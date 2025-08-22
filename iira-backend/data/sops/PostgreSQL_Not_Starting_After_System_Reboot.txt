@@ -1,0 +1,43 @@
+Title: PostgreSQL Not Starting After System Reboot
+
+Issue:
+PostgreSQL service fails to start automatically after a system reboot.
+
+Resolution Steps:
+1. Check PostgreSQL service status.
+   Script: check_service_status
+   Parameters:
+     - service_name: postgresql
+
+2. View PostgreSQL logs for recent errors.
+   Script: view_service_logs
+   Parameters:
+     - service_name: postgresql
+     - since_minutes: 10
+
+3. Verify PostgreSQL port availability.
+   Script: check_port_usage
+   Parameters:
+     - port: 5432
+
+4. Fix data directory permissions.
+   Script: fix_directory_permissions
+   Parameters:
+     - directory: /var/lib/postgresql/14/main
+     - owner: postgres
+     - group: postgres
+     - mode: "700"
+
+5. Check available disk space.
+   Script: check_disk_space
+   Parameters:
+     - path: /
+
+6. Restart PostgreSQL service.
+   Script: restart_service
+   Parameters:
+     - service_name: postgresql
+
+Notes:
+Ensure PostgreSQL is enabled to start on boot using 'sudo systemctl enable postgresql'.
+If corruption is detected, run 'pg_resetwal' cautiously as it may cause data loss.

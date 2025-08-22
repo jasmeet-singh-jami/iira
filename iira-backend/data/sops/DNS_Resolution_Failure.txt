@@ -1,0 +1,28 @@
+Title: DNS Resolution Failure
+
+Issue:
+User reports that domains are not resolving on their system.
+
+Resolution Steps:
+1. Verify that DNS resolution is indeed failing for users.
+   Script: verify_dns_failure
+   Parameters:
+     - hostname: google.com
+
+2. Clear DNS cache.
+   Script: clear_dns_cache
+   Parameters:
+     - delay_seconds: 5
+
+3. Restart network manager.
+   Script: restart_network_service
+   Parameters:
+     - service_name: NetworkManager
+
+4. Test DNS resolution.
+   Script: test_dns
+   Parameters:
+     - hostname: google.com
+
+Notes:
+If system uses static DNS, ensure /etc/resolv.conf is updated.

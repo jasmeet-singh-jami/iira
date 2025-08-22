@@ -1,0 +1,69 @@
+version: "3.9"
+
+services:
+  frontend:
+    build: ./iira-frontend
+    container_name: react-frontend
+    ports:
+      - "3000:80"
+    depends_on:
+      - backend
+
+  backend:
+    build: ./iira-backend
+    container_name: python-backend
+    ports:
+      - "8000:8000"
+    env_file:
+      - ./iira-backend/.env.docker
+    depends_on:
+      - postgres
+      - qdrant
+
+  postgres:
+    image: postgres:15
+    container_name: postgres-db
+    restart: always
+    environment:
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: postgres
+      POSTGRES_DB: iira
+    ports:
+      - "5433:5432" # avoid conflict with local Postgres
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+
+  qdrant:
+    image: qdrant/qdrant:v1.9.2
+    container_name: qdrant-db
+    restart: always
+    ports:
+      - "6333:6333"
+    volumes:
+      - qdrant_storage:/qdrant/storage
+
+  # ollama:
+  #   image: ollama/ollama:latest
+  #   container_name: ollama
+  #   restart: unless-stopped
+  #   ports:
+  #     - "11434:11434"
+  #   volumes:
+  #     - ollama_models:/root/.ollama
+  #   entrypoint: >
+  #     sh -c "
+  #       ollama serve & 
+  #       echo 'Waiting for Ollama...' &&
+  #       until ollama status > /dev/null 2>&1; do sleep 2; done &&
+  #       if ! ollama list | grep -q llama3:latest; then 
+  #         echo 'Pulling llama3:latest...' && ollama pull llama3:latest; 
+  #       fi &&
+  #       wait -n
+  #     "
+
+
+
+volumes:
+  postgres_data:
+  qdrant_storage:
+  # ollama_models:

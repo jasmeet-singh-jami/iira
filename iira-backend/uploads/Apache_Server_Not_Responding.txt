@@ -1,0 +1,23 @@
+Title: Apache Server Not Responding
+
+Issue:
+Users are unable to access websites hosted on Apache due to the server not responding.
+
+Resolution Steps:
+1. Check if Apache service is running.
+   Script: check_service_status
+   Parameters:
+     - service_name: apache2
+
+2. Restart Apache service.
+   Script: restart_apache
+   Parameters:
+     - delay_seconds: 0
+
+3. Confirm that Apache restarted successfully.
+   Script: verify_web_port
+   Parameters:
+     - port: 80
+
+Notes:
+Ensure that no critical file changes are pending in the Apache config.
