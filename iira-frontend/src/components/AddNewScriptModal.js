@@ -1,8 +1,8 @@
 // src/components/AddNewScriptModal.js
 import React, { useState } from 'react';
-import axios from 'axios';
 import { Plus, X, Save, ChevronDown } from 'lucide-react';
 import Modal from './Modal';
+import { saveScriptApi } from '../services/apis';
 
 const AddNewScriptModal = ({ isOpen, onClose, onScriptAdded, scripts }) => {
     const [name, setName] = useState('');
@@ -48,25 +48,20 @@ const AddNewScriptModal = ({ isOpen, onClose, onScriptAdded, scripts }) => {
         };
 
         try {
-            const response = await axios.post("http://localhost:8000/scripts/add", newScript);
-
-            if (response.status === 200) {
-                setModalMessage({ visible: true, message: 'Script added successfully!' });
-                setName('');
-                setDescription('');
-                setTags('');
-                setPath('');
-                setParams([{ param_name: '', param_type: 'string', required: true, default_value: '' }]);
-                setTimeout(() => {
-                    onClose();
-                    onScriptAdded();
-                }, 1500);
-            } else {
-                setModalMessage({ visible: true, message: 'Failed to add new script. Please check the backend response.' });
-            }
+            await saveScriptApi(newScript);
+            setModalMessage({ visible: true, message: 'Script added successfully!' });
+            setName('');
+            setDescription('');
+            setTags('');
+            setPath('');
+            setParams([{ param_name: '', param_type: 'string', required: true, default_value: '' }]);
+            setTimeout(() => {
+                onClose();
+                onScriptAdded();
+            }, 1500);
         } catch (error) {
             console.error("Error adding new script:", error);
-            setModalMessage({ visible: true, message: 'Failed to add new script. Please check the API server.' });
+            setModalMessage({ visible: true, message: error.message });
         }
     };
 

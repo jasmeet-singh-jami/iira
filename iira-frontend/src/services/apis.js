@@ -68,3 +68,14 @@ export const executeScriptApi = async (scriptId, scriptName, parameters) => {
         throw new Error('Script execution failed. Please check the backend API server.');
     }
 };
+
+// Saves a new script with its parameters to the backend.
+export const saveScriptApi = async (newScript) => {
+    try {
+        const response = await axios.post(`${API_BASE}/api/scripts/add`, newScript);
+        return response.data;
+    } catch (error) {
+        throw new Error('Failed to add new script. Please check the API server.');
+    }
+};
+
