@@ -1,10 +1,10 @@
+// src/App.js
 import React, { useState, useEffect } from 'react';
-import axios from 'axios';
-import { Search, Loader2, Plus, X, AlertCircle } from 'lucide-react';
 import Modal from './components/Modal';
 import AddNewScriptModal from './components/AddNewScriptModal';
 import SopIngestion from './components/SopIngestion';
 import IncidentResolution from './components/IncidentResolution';
+import { fetchScriptsApi, uploadSOPApi, resolveIncidentApi, executeScriptApi } from './services/apis';
 
 function App() {
     // State for the SOP ingestion form
@@ -17,9 +17,9 @@ function App() {
     const [incidentDetails, setIncidentDetails] = useState(null);
     const [resolvedScripts, setResolvedScripts] = useState([]);
     const [loading, setLoading] = useState(false);
-    
+
     // New state to manage the 'Execute All' process
-    const [isExecutingAll, setIsExecutingAll] = useState(false); 
+    const [isExecutingAll, setIsExecutingAll] = useState(false);
 
     // Global state
     const [availableScripts, setAvailableScripts] = useState([]);
@@ -29,11 +29,11 @@ function App() {
 
     const fetchScripts = async () => {
         try {
-            const response = await axios.get("http://localhost:8000/scripts");
-            setAvailableScripts(response.data.scripts);
+            const scripts = await fetchScriptsApi();
+            setAvailableScripts(scripts);
         } catch (error) {
-            console.error("Error fetching scripts:", error);
-            setModal({ visible: true, message: 'Failed to load scripts from the backend. Please check the API server.' });
+            console.error(error.message);
+            setModal({ visible: true, message: error.message });
         }
     };
 
@@ -71,14 +71,14 @@ function App() {
 
         try {
             const sop = { title, issue, steps: validSteps };
-            await axios.post("http://localhost:8000/ingest", { sops: [sop] });
+            await uploadSOPApi(sop);
             setModal({ visible: true, message: 'SOP ingested successfully!' });
             setTitle('');
             setIssue('');
             setSteps([{ description: '', script: '' }]);
         } catch (error) {
-            console.error("Error ingesting SOP:", error);
-            setModal({ visible: true, message: 'Failed to ingest SOP. Please check the API server.' });
+            console.error(error.message);
+            setModal({ visible: true, message: error.message });
         }
     };
 
@@ -98,8 +98,7 @@ function App() {
         setResolvedScripts([]);
 
         try {
-            const response = await axios.get(`http://localhost:8000/incident/${incidentNumber}`);
-            const incidentResults = response.data;
+            const incidentResults = await resolveIncidentApi(incidentNumber);
 
             if (incidentResults.resolved_scripts && incidentResults.resolved_scripts.length > 0) {
                 setIncidentDetails(incidentResults.incident_data);
@@ -112,11 +111,11 @@ function App() {
                 setResolvedScripts([]);
                 setModal({ visible: true, message: 'No relevant SOPs or scripts found for this incident.', onAddSOP: switchToIngestTab });
             }
-        } catch (err) {
-            console.error("Incident resolution failed:", err);
+        } catch (error) {
+            console.error(error.message);
             setIncidentDetails(null);
             setResolvedScripts([]);
-            setModal({ visible: true, message: 'Incident resolution failed. Please try again or check the incident number.' });
+            setModal({ visible: true, message: error.message });
         } finally {
             setLoading(false);
         }
@@ -133,33 +132,33 @@ function App() {
             };
             return updatedScripts;
         });
-    
+
         try {
-            const response = await axios.post("http://localhost:8000/execute_script", {
-                script_id: scriptToExecute.script_id,
-                script_name: scriptToExecute.script_name,
-                parameters: scriptToExecute.extracted_parameters
-            });
-    
+            const response = await executeScriptApi(
+                scriptToExecute.script_id,
+                scriptToExecute.script_name,
+                scriptToExecute.extracted_parameters
+            );
+
             // Update status based on API response
             setResolvedScripts(prev => {
                 const updatedScripts = [...prev];
                 updatedScripts[scriptIndex] = {
                     ...updatedScripts[scriptIndex],
-                    executionStatus: response.data.status === 'success' ? 'success' : 'error',
-                    output: response.data.output
+                    executionStatus: response.status === 'success' ? 'success' : 'error',
+                    output: response.output
                 };
                 return updatedScripts;
             });
-    
-        } catch (err) {
+
+        } catch (error) {
             // Update status to 'error' on API call failure
             setResolvedScripts(prev => {
                 const updatedScripts = [...prev];
                 updatedScripts[scriptIndex] = {
                     ...updatedScripts[scriptIndex],
                     executionStatus: 'error',
-                    output: 'Script execution failed. Please check the backend API server.'
+                    output: error.message
                 };
                 return updatedScripts;
             });
@@ -206,35 +205,35 @@ function App() {
             });
 
             try {
-                const response = await axios.post("http://localhost:8000/execute_script", {
-                    script_id: script.script_id,
-                    script_name: script.script_name,
-                    parameters: script.extracted_parameters
-                });
+                const response = await executeScriptApi(
+                    script.script_id,
+                    script.script_name,
+                    script.extracted_parameters
+                );
 
                 // Update status and output based on API response
                 setResolvedScripts(prev => {
                     const newScripts = [...prev];
                     newScripts[i] = {
                         ...newScripts[i],
-                        executionStatus: response.data.status === 'success' ? 'success' : 'error',
-                        output: response.data.output
+                        executionStatus: response.status === 'success' ? 'success' : 'error',
+                        output: response.output
                     };
                     return newScripts;
                 });
 
                 // Stop execution if a script fails
-                if (response.data.status === 'error') {
+                if (response.status === 'error') {
                     break;
                 }
-            } catch (err) {
+            } catch (error) {
                 // Handle API call failure
                 setResolvedScripts(prev => {
                     const newScripts = [...prev];
                     newScripts[i] = {
                         ...newScripts[i],
                         executionStatus: 'error',
-                        output: 'Script execution failed due to an API error.'
+                        output: error.message
                     };
                     return newScripts;
                 });

@@ -203,7 +203,7 @@ def execute_script(request: ExecuteScriptRequest):
     time.sleep(5)
 
     # Randomize result
-    if random.random() < 0.7:
+    if random.random() < 0.8:
         return JSONResponse(
             content={
                 "status": "success",

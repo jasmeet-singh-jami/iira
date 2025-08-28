@@ -4,17 +4,17 @@ Issue:
 Users are unable to access websites hosted on Apache due to the server not responding.
 
 Resolution Steps:
-1. Check if Apache service is running.
+1. Check if Apache service is running. service_name can be fetched from Issue Description.
    Script: check_service_status
    Parameters:
      - service_name: apache2
 
-2. Restart Apache service.
+2. Restart Apache service. delay_seconds can be 5 if not mentioned.
    Script: restart_apache
    Parameters:
      - delay_seconds: 0
 
-3. Confirm that Apache restarted successfully.
+3. Confirm that Apache restarted successfully. Fetch the port from the Issue Description otherwise use the default 80.
    Script: verify_web_port
    Parameters:
      - port: 80
