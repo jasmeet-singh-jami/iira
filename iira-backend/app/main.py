@@ -7,7 +7,7 @@ from app.services.embed_documents import embed_and_store_sops
 from app.services.script_resolver import resolve_scripts
 from app.services.search_sop import search_sop_by_query
 # Updated import to get the more detailed script data
-from app.services.scripts import get_scripts_from_db, add_script_to_db, get_script_by_name
+from app.services.scripts import get_scripts_from_db, add_script_to_db, get_script_by_name, add_incident_history_to_db
 # Import the new, dynamic LLM function for parameter extraction
 from app.services.llm_client import get_llm_plan, extract_parameters_with_llm, DEFAULT_MODELS
 
@@ -172,6 +172,9 @@ async def resolve_incident_by_number(
                 resolved_script['extracted_parameters'] = extracted_params
 
         final_resolved_scripts.append(resolved_script)
+
+    # ✅ Store the incident resolution history in the database
+    add_incident_history_to_db(incident_number, incident_data, llm_plan_dict, final_resolved_scripts)    
 
     return JSONResponse(content={
         "incident_number": incident_number,

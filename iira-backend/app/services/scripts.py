@@ -3,6 +3,7 @@
 import psycopg2
 from app.config import settings
 from typing import List, Dict, Optional
+import json  # ✅ Added json import
 
 # The database connection string for PostgreSQL database.
 DATABASE_URL = settings.database_url
@@ -221,4 +222,35 @@ def add_script_to_db(name: str, description: str, tags: List[str], path: str, pa
             conn.close()
         print("🔒 Database connection closed.")
 
+def add_incident_history_to_db(incident_number: str, incident_data: Dict, llm_plan: Dict, resolved_scripts: List[Dict]):
+    """
+    Connects to the database and stores the incident resolution history.
+    """
+    conn = None
+    try:
+        conn = psycopg2.connect(DATABASE_URL)
+        cur = conn.cursor()
 
+        cur.execute(
+            """
+            INSERT INTO incident_history (incident_number, incident_data, llm_plan, resolved_scripts)
+            VALUES (%s, %s, %s, %s);
+            """,
+            (
+                incident_number,
+                json.dumps(incident_data),  # ✅ Convert dictionaries to JSON strings
+                json.dumps(llm_plan),
+                json.dumps(resolved_scripts)
+            )
+        )
+        conn.commit()
+        print(f"✅ Incident history for '{incident_number}' saved successfully.")
+
+    except (Exception, psycopg2.DatabaseError) as error:
+        print(f"❌ Database error while saving incident history: {error}")
+        if conn:
+            conn.rollback()
+    finally:
+        if conn is not None:
+            conn.close()
+            print("🔒 Database connection for history closed.")
