@@ -4,6 +4,7 @@ import Modal from './components/Modal';
 import AddNewScriptModal from './components/AddNewScriptModal';
 import SopIngestion from './components/SopIngestion';
 import IncidentResolution from './components/IncidentResolution';
+import History from './components/History';
 import { fetchScriptsApi, uploadSOPApi, resolveIncidentApi, executeScriptApi } from './services/apis';
 
 function App() {
@@ -26,6 +27,11 @@ function App() {
     const [modal, setModal] = useState({ visible: false, message: '' });
     const [isNewScriptModalOpen, setIsNewScriptModalOpen] = useState(false);
     const [activeTab, setActiveTab] = useState('search');
+    
+    // State for history tab (new)
+    const [incidentHistory, setIncidentHistory] = useState([]);
+    const [loadingHistory, setLoadingHistory] = useState(false);
+    const [historyModal, setHistoryModal] = useState({ visible: false, message: '' });
 
     const fetchScripts = async () => {
         try {
@@ -40,6 +46,20 @@ function App() {
     useEffect(() => {
         fetchScripts();
     }, []);
+    
+    // ✅ Handle History Tab Fetching
+    const fetchHistory = async () => {
+        setLoadingHistory(true);
+        try {
+            // This is now handled within the History component
+        } catch (error) {
+            setHistoryModal({ visible: true, message: 'Failed to load history: ' + error.message });
+        } finally {
+            setLoadingHistory(false);
+        }
+    };
+    
+    // We can remove the useEffect that calls fetchHistory on tab change because the History component will handle its own data fetching.
 
     const handleStepChange = (index, field, value) => {
         const updatedSteps = [...steps];
@@ -256,9 +276,16 @@ function App() {
                     </button>
                     <button
                         onClick={() => setActiveTab('ingest')}
-                        className={`py-3 px-8 text-xl font-bold rounded-r-full transition duration-300 focus:outline-none ${activeTab === 'ingest' ? 'bg-blue-600 text-white shadow-lg' : 'bg-gray-200 text-gray-700 hover:bg-gray-300'}`}
+                        className={`py-3 px-8 text-xl font-bold transition duration-300 focus:outline-none ${activeTab === 'ingest' ? 'bg-blue-600 text-white shadow-lg' : 'bg-gray-200 text-gray-700 hover:bg-gray-300'}`}
                     >
                         SOP Ingestion
+                    </button>
+                    {/* ✅ New History Tab Button */}
+                    <button
+                        onClick={() => setActiveTab('history')}
+                        className={`py-3 px-8 text-xl font-bold rounded-r-full transition duration-300 focus:outline-none ${activeTab === 'history' ? 'bg-blue-600 text-white shadow-lg' : 'bg-gray-200 text-gray-700 hover:bg-gray-300'}`}
+                    >
+                        History
                     </button>
                 </div>
 
@@ -288,6 +315,16 @@ function App() {
                         resolvedScripts={resolvedScripts}
                         executeScript={executeScript}
                         onExecuteAll={onExecuteAll}
+                    />
+                )}
+
+                {/* ✅ Render the new History component */}
+                {activeTab === 'history' && (
+                    <History
+                        incidentHistory={incidentHistory}
+                        loading={loadingHistory}
+                        modal={historyModal}
+                        setModal={setHistoryModal}
                     />
                 )}
             </div>

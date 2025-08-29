@@ -6,9 +6,9 @@ from fastapi.middleware.cors import CORSMiddleware
 from app.services.embed_documents import embed_and_store_sops
 from app.services.script_resolver import resolve_scripts
 from app.services.search_sop import search_sop_by_query
-# Updated import to get the more detailed script data
+
 from app.services.scripts import get_scripts_from_db, add_script_to_db, get_script_by_name, add_incident_history_to_db
-# Import the new, dynamic LLM function for parameter extraction
+from app.services.history import get_incident_history_from_db
 from app.services.llm_client import get_llm_plan, extract_parameters_with_llm, DEFAULT_MODELS
 
 from pydantic import BaseModel
@@ -228,3 +228,15 @@ def execute_script(request: ExecuteScriptRequest):
             },
             status_code=200,
         )
+
+@app.get("/history")
+def get_incident_history():
+    """
+    Retrieves all incident history from the database.
+    """
+    try:
+        history = get_incident_history_from_db()
+        return {"history": history}
+    except Exception as e:
+        print(f"Error fetching history: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
