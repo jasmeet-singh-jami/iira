@@ -80,12 +80,14 @@ export const saveScriptApi = async (newScript) => {
 };
 
 // function to fetch incident history
-export const fetchHistoryApi = async () => {
-    try {
-        const response = await axios.get(`${API_BASE}/api/history`);
-        return response.data.history;
-    } catch (error) {
-        throw new Error('Failed to fetch incident history.');
-    }
+export const fetchHistoryApi = async (page = 1, limit = 10) => {
+  try {
+    const response = await axios.get(`${API_BASE}/api/history`, {
+      params: { page, limit },
+    });
+    return response.data; // contains { history, total_records, total_pages, current_page }
+  } catch (error) {
+    throw new Error("Failed to fetch incident history.");
+  }
 };
 

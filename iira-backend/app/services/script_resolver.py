@@ -30,8 +30,6 @@ def resolve_scripts(llm_plan, available_scripts):
         tool_name = step.get("tool")
         step_description = step.get("description")
         
-        print(f"\n--- Processing step: '{step_description}' with tool: '{tool_name}' ---")
-        
         # Initialize a placeholder for the best-matched script
         best_match = None
         highest_score = 0.0
@@ -51,19 +49,15 @@ def resolve_scripts(llm_plan, available_scripts):
             # We also check if the tool name is a substring of the script name
             # as a secondary check.
             if normalized_tool_name in normalized_script_name:
-                similarity_score = 1.0  # Give an exact match a perfect score
-            
-            print(f"  - Comparing with script: '{script['name']}', similarity score: {similarity_score:.2f}")
+                similarity_score = 1.0  # Give an exact match a perfect score            
 
             if similarity_score > highest_score:
                 highest_score = similarity_score
                 best_match = script
-                print(f"  > New best match found: '{best_match['name']}' with score: {highest_score:.2f}")
         
         # Only add a script if the similarity score is above a certain threshold
         # This prevents matching unrelated scripts. A score of 0.5 is a reasonable starting point.
         if highest_score >= 0.5 and best_match:
-            print(f"✅ Matched tool '{tool_name}' to script '{best_match['name']}' with final score {highest_score:.2f}")
             resolved_workflow.append({
                 "script_id": best_match['id'],
                 "step_description": step_description,
@@ -75,7 +69,6 @@ def resolve_scripts(llm_plan, available_scripts):
         else:
             # If no suitable script is found, we still want to show the LLM's step
             # so the user can see what needs to be done manually.
-            print(f"❌ No suitable script found for tool '{tool_name}'. Highest score was {highest_score:.2f}")
             resolved_workflow.append({
                 "script_id": "Not Found",
                 "step_description": step_description,

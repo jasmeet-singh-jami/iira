@@ -8,17 +8,34 @@ from app.services.script_resolver import resolve_scripts
 from app.services.search_sop import search_sop_by_query
 
 from app.services.scripts import get_scripts_from_db, add_script_to_db, get_script_by_name, add_incident_history_to_db
-from app.services.history import get_incident_history_from_db
+from app.services.history import get_incident_history_from_db_paginated
+from app.services.incidents import get_new_unresolved_incidents, update_incident_status, fetch_incident_by_number
 from app.services.llm_client import get_llm_plan, extract_parameters_with_llm, DEFAULT_MODELS
 
 from pydantic import BaseModel
 from typing import List, Dict, Optional, Any
+from contextlib import asynccontextmanager
+import asyncio
 
 import time
 import random
+from datetime import datetime
 
+# Use an async context manager for startup and shutdown events
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    # This task will run in the background.
+    monitor_task = asyncio.create_task(monitor_new_incidents())
+    print("🚀 Background incident monitor started.")
+    yield
+    # This will be executed when the application shuts down.
+    monitor_task.cancel()
+    try:
+        await monitor_task
+    except asyncio.CancelledError:
+        print("🛑 Background incident monitor stopped.")
 
-app = FastAPI()
+app = FastAPI(lifespan=lifespan)
 
 app.add_middleware(
     CORSMiddleware,
@@ -57,35 +74,89 @@ class AddScriptRequest(BaseModel):
 class ExecuteScriptRequest(BaseModel):
     script_id: str
     script_name: str
-    parameters: Dict[str, Any]    
+    parameters: Dict[str, Any]      
 
-# MOCK ServiceNow incident data
-MOCK_INCIDENTS = {
-    "INC001": {
-        "number": "INC001",
-        "short_description": "Apache Server Not Responding",
-        "description": "The web server running Apache is not responding to any HTTP requests. The service appears to be down and needs immediate attention. The host is `web-server-01.example.com`.",
-        "assigned_to": "John Doe",
-        "state": "In Progress",
-        "host": "web-server-01.example.com",
-    },
-    "INC002": {
-        "number": "INC002",
-        "short_description": "DNS Resolution Failure",
-        "description": "Users are reporting that they cannot access internal company resources by hostname. DNS resolution appears to be failing on the primary DNS server `dns-server-02.internal.com`.",
-        "assigned_to": "Jane Smith",
-        "state": "In Progress",
-        "host": "dns-server-02.internal.com",
-    },
-    "INC003": {
-        "number": "INC003",
-        "short_description": "PostgreSQL Not Starting After System Reboot",
-        "description": "The PostgreSQL service failed to start automatically after a system reboot of the database server. The host is `db-server-03.example.com`. Investigation into logs is required.",
-        "assigned_to": "John Doe",
-        "state": "New",
-        "host": "db-server-03.example.com",
-    },
-}
+async def monitor_new_incidents():
+    """
+    A long-running task to periodically check for new incidents in the database
+    and trigger the resolution process for them.
+    """
+    while True:
+        try:
+            print("⏱️ Checking for new unresolved incidents...")
+            # Use asyncio.to_thread for the synchronous database call
+            new_incidents = await asyncio.to_thread(get_new_unresolved_incidents)
+            
+            if new_incidents:
+                print(f"✅ Found {len(new_incidents)} new incidents. Triggering resolution.")
+                # The get_new_unresolved_incidents function now returns a dictionary,
+                # so we must iterate over its items to get both the incident number and data.
+                for incident_number, incident_data in new_incidents.items():
+                    # Get the incident ID
+                    incident_id = incident_data["id"]
+                    
+                    # Change incident status to 'In Progress' immediately.
+                    # This prevents the monitor from picking it up in the next cycle.
+                    await asyncio.to_thread(update_incident_status, incident_id, "In Progress")
+                    print(f"➡️ Incident {incident_number} status updated to 'In Progress'.")
+                    
+                    # Duplicate the resolution logic from the endpoint
+                    rag_query = f"{incident_data['short_description']} {incident_data['description']}"
+                    retrieved_sops = await asyncio.to_thread(search_sop_by_query, rag_query)
+
+                    # Check and convert any datetime objects in the incident data to a string for JSON serialization
+                    
+                    if "timestamp" in incident_data and isinstance(incident_data["timestamp"], datetime):
+                        incident_data["timestamp"] = incident_data["timestamp"].isoformat()
+
+                    if not retrieved_sops:
+                        print(f"❌ No relevant SOPs found for {incident_number}. Skipping.")
+                        await asyncio.to_thread(update_incident_status, incident_id, "Error")
+                        continue
+                    
+                    plan_model = DEFAULT_MODELS["plan"]
+                    param_model = DEFAULT_MODELS["param_extraction"]
+                    
+                    llm_plan_dict = await asyncio.to_thread(get_llm_plan, rag_query, retrieved_sops, model=plan_model)
+                    
+                    available_scripts_with_params = await asyncio.to_thread(get_scripts_from_db)
+                    resolved_scripts = resolve_scripts(llm_plan_dict, available_scripts_with_params)
+                    
+                    final_resolved_scripts = []
+                    for resolved_script in resolved_scripts:
+                        script_name = resolved_script.get('script_name')
+                        if script_name:
+                            script_details = next((s for s in available_scripts_with_params if s['name'] == script_name), None)
+                            if script_details and script_details.get('params'):
+                                extracted_params = await asyncio.to_thread(extract_parameters_with_llm, incident_data, script_details['params'], model=param_model)
+                                resolved_script['extracted_parameters'] = extracted_params
+
+                        final_resolved_scripts.append(resolved_script)     
+
+                    # Add detailed logs to see the data before it's sent
+                    print(f"📄 Incident data before adding history: {incident_data}")
+                    print(f"📝 Resolved scripts before adding history: {final_resolved_scripts}")
+                    
+                    
+
+                    await asyncio.to_thread(add_incident_history_to_db, incident_number, incident_data, llm_plan_dict, final_resolved_scripts)
+                    
+                    # Mark incident as resolved in the database.
+                    await asyncio.to_thread(update_incident_status, incident_id, "Resolved")
+                    print(f"🎉 Resolution complete and incident {incident_number} marked as resolved.")
+
+            else:
+                print("No new incidents found.")
+            
+            # Wait for a fixed period before checking again
+            await asyncio.sleep(60) # Wait for 30 seconds
+            
+        except Exception as e:
+            # Added more specific exception handling and logging
+            print(f"Error in incident monitor: {e}")
+            await asyncio.to_thread(update_incident_status, incident_id, "Error")
+            await asyncio.sleep(60) # Wait longer on error to prevent a tight loop
+
 
 @app.post("/ingest")
 def ingest_sop(request: IngestRequest):
@@ -133,7 +204,7 @@ async def search_sop(
         "llm_plan": llm_plan_dict,
         "resolved_scripts": resolved_scripts,
         "retrieved_sops": retrieved_sops,
-        "model_used": model  # ✅ useful for debugging
+        "model_used": model  
     }, status_code=200)
 
 
@@ -146,7 +217,7 @@ async def resolve_incident_by_number(
     """
     Incident Orchestration: RAG → LLM plan → Script resolution → Parameter extraction.
     """
-    incident_data = MOCK_INCIDENTS.get(incident_number.upper())
+    incident_data = fetch_incident_by_number(incident_number.upper())
     if not incident_data:
         raise HTTPException(status_code=404, detail=f"Incident {incident_number} not found.")
 
@@ -174,7 +245,7 @@ async def resolve_incident_by_number(
         final_resolved_scripts.append(resolved_script)
 
     # ✅ Store the incident resolution history in the database
-    add_incident_history_to_db(incident_number, incident_data, llm_plan_dict, final_resolved_scripts)    
+    add_incident_history_to_db(incident_number, incident_data, llm_plan_dict, final_resolved_scripts)     
 
     return JSONResponse(content={
         "incident_number": incident_number,
@@ -230,13 +301,16 @@ def execute_script(request: ExecuteScriptRequest):
         )
 
 @app.get("/history")
-def get_incident_history():
+def get_incident_history(
+    page: int = Query(1, ge=1, description="Page number"),
+    limit: int = Query(10, ge=1, le=100, description="Records per page"),
+):
     """
-    Retrieves all incident history from the database.
+    Retrieves incident history with pagination.
     """
     try:
-        history = get_incident_history_from_db()
-        return {"history": history}
+        result = get_incident_history_from_db_paginated(page, limit)
+        return result
     except Exception as e:
         print(f"Error fetching history: {e}")
         raise HTTPException(status_code=500, detail=str(e))
