@@ -14,24 +14,37 @@ const History = () => {
   const [totalPages, setTotalPages] = useState(1);
   const limit = 10; // items per page
 
+  // Function to fetch history data
+  const fetchHistory = async () => {
+    setLoading(true);
+    try {
+      // Updated API call to include page and limit
+      const data = await fetchHistoryApi(page, limit);
+      setIncidentHistory(data.history);
+      setTotalPages(data.total_pages);
+    } catch (error) {
+      console.error(error.message);
+      setModal({ visible: true, message: 'Failed to load history. ' + error.message });
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  // Initial fetch and fetch on page change
   useEffect(() => {
-    const fetchHistory = async () => {
-      setLoading(true);
-      try {
-        // Updated API call to include page and limit
-        const data = await fetchHistoryApi(page, limit);
-        setIncidentHistory(data.history);
-        setTotalPages(data.total_pages);
-      } catch (error) {
-        console.error(error.message);
-        setModal({ visible: true, message: 'Failed to load history. ' + error.message });
-      } finally {
-        setLoading(false);
-      }
-    };
     fetchHistory();
     // Dependency array includes 'page' to refetch data on page change
   }, [page]);
+
+  // Set up an interval to refresh data every minute
+  useEffect(() => {
+    const intervalId = setInterval(() => {
+      fetchHistory();
+    }, 60000); // 60000 ms = 1 minute
+
+    // Cleanup function to clear the interval when the component unmounts
+    return () => clearInterval(intervalId);
+  }, [page]); // Re-run the effect if page changes to restart the timer
 
   const toggleExpand = (incidentNumber) => {
     setExpandedIncidents(prev => ({

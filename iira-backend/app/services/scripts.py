@@ -254,3 +254,35 @@ def add_incident_history_to_db(incident_number: str, incident_data: Dict, llm_pl
         if conn is not None:
             conn.close()
             print("🔒 Database connection for history closed.")
+
+def update_incident_history(incident_number: str, llm_plan: Dict, resolved_scripts: List[Dict]):
+    """
+    Connects to the database and stores the incident resolution history.
+    """
+    conn = None
+    try:
+        conn = psycopg2.connect(DATABASE_URL)
+        cur = conn.cursor()
+
+        cur.execute(
+            """
+            UPDATE incident_history SET llm_plan = %s, resolved_scripts = %s
+            WHERE incident_number = %s;
+            """,
+            (
+                json.dumps(llm_plan),
+                json.dumps(resolved_scripts),
+                incident_number                
+            )
+        )
+        conn.commit()
+        print(f"✅ Incident history for '{incident_number}' updated successfully.")
+
+    except (Exception, psycopg2.DatabaseError) as error:
+        print(f"❌ Database error while updating incident history: {error}")
+        if conn:
+            conn.rollback()
+    finally:
+        if conn is not None:
+            conn.close()
+            print("🔒 Database connection for history closed.")            

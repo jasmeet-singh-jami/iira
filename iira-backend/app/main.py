@@ -7,7 +7,7 @@ from app.services.embed_documents import embed_and_store_sops
 from app.services.script_resolver import resolve_scripts
 from app.services.search_sop import search_sop_by_query
 
-from app.services.scripts import get_scripts_from_db, add_script_to_db, get_script_by_name, add_incident_history_to_db
+from app.services.scripts import get_scripts_from_db, add_script_to_db, get_script_by_name, add_incident_history_to_db, update_incident_history
 from app.services.history import get_incident_history_from_db_paginated
 from app.services.incidents import get_new_unresolved_incidents, update_incident_status, fetch_incident_by_number
 from app.services.llm_client import get_llm_plan, extract_parameters_with_llm, DEFAULT_MODELS
@@ -99,6 +99,8 @@ async def monitor_new_incidents():
                     # This prevents the monitor from picking it up in the next cycle.
                     await asyncio.to_thread(update_incident_status, incident_id, "In Progress")
                     print(f"➡️ Incident {incident_number} status updated to 'In Progress'.")
+
+                    await asyncio.to_thread(add_incident_history_to_db, incident_number, incident_data, None, None)
                     
                     # Duplicate the resolution logic from the endpoint
                     rag_query = f"{incident_data['short_description']} {incident_data['description']}"
@@ -139,7 +141,7 @@ async def monitor_new_incidents():
                     
                     
 
-                    await asyncio.to_thread(add_incident_history_to_db, incident_number, incident_data, llm_plan_dict, final_resolved_scripts)
+                    await asyncio.to_thread(update_incident_history, incident_number, llm_plan_dict, final_resolved_scripts)
                     
                     # Mark incident as resolved in the database.
                     await asyncio.to_thread(update_incident_status, incident_id, "Resolved")
