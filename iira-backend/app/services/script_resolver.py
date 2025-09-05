@@ -19,6 +19,8 @@ def resolve_scripts(llm_plan, available_scripts):
               Each dictionary contains the original step description and the
               details of the best-matched script.
     """
+    print(f"🕵️  Attempting to resolve LLM plan: {llm_plan}")
+
     print("----------------------------------------")
     print("Starting script resolution process...")
     print(f"Available scripts to match against: {[s.get('name') for s in available_scripts]}")

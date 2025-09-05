@@ -9,7 +9,7 @@ from app.config import settings
 # Default models to use for different tasks
 DEFAULT_MODELS = {
     "plan": "llama3:latest",             # SOP step planning
-    "param_extraction": "llama3:latest" #"mistral:instruct" #"phi3:mini",  # Lightweight parameter extraction
+    "param_extraction": "llama3:latest" 
 }
 
 # Default models (can be overridden by environment variables)
@@ -59,8 +59,13 @@ def extract_json_from_text(text: str) -> Dict:
         json_end = text.rfind('}')
         if json_start != -1 and json_end != -1:
             return json.loads(text[json_start: json_end + 1])
+    # --- MODIFICATION START ---
     except json.JSONDecodeError as e:
-        print(f"JSON decode error: {e}")
+        print(f"❌ JSON decode error: {e}")
+        print("----- Text That Failed to Parse -----")
+        print(text)
+        print("-------------------------------------")
+    # --- MODIFICATION END ---
     return {}
 
 
@@ -92,16 +97,20 @@ def get_llm_plan(query: str, context: List[Dict], model: str = MODEL_PLAN) -> Di
         ...
       ]
     }}
+    Do not include any comments in the json.
     """
 
     response_text = call_ollama(prompt, model=model)
+    # --- MODIFICATION START ---
+    print("\n---------- LLM Raw Response for Plan ----------")
+    print(response_text)
+    print("---------------------------------------------\n")
+    # --- MODIFICATION END ---
     return extract_json_from_text(response_text) or {"steps": []}
 
 
 def extract_parameters_with_llm(incident_data: Dict, script_params: List[Dict], model: str = MODEL_PARAMS) -> Dict:
-    """
-    Extracts parameter values from incident data using the given model.
-    """
+    # ... (no changes in this function)
     params_to_find = [
         f"param_name: '{p.get('param_name')}', type: '{p.get('param_type')}', required: '{p.get('required')}'"
         for p in script_params if isinstance(p, dict)

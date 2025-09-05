@@ -66,6 +66,8 @@ const History = () => {
         return 'bg-yellow-200 text-yellow-800';
       case 'Resolved':
         return 'bg-green-200 text-green-800';
+      case 'Error':
+        return 'bg-red-200 text-red-800';  
       default:
         return 'bg-gray-200 text-gray-800';
     }

@@ -20,6 +20,8 @@ import asyncio
 import time
 import random
 from datetime import datetime
+import json
+
 
 # Use an async context manager for startup and shutdown events
 @asynccontextmanager
@@ -84,22 +86,23 @@ async def monitor_new_incidents():
     while True:
         try:
             print("⏱️ Checking for new unresolved incidents...")
-            # Use asyncio.to_thread for the synchronous database call
+            # Step 1: Use asyncio.to_thread for the synchronous database call
             new_incidents = await asyncio.to_thread(get_new_unresolved_incidents)
             
             if new_incidents:
                 print(f"✅ Found {len(new_incidents)} new incidents. Triggering resolution.")
-                # The get_new_unresolved_incidents function now returns a dictionary,
-                # so we must iterate over its items to get both the incident number and data.
+                
+                # Step 2: Immediately update the status of all new incidents to 'In Progress'
+                # This prevents them from being picked up again in the next cycle.
                 for incident_number, incident_data in new_incidents.items():
-                    # Get the incident ID
                     incident_id = incident_data["id"]
-                    
-                    # Change incident status to 'In Progress' immediately.
-                    # This prevents the monitor from picking it up in the next cycle.
                     await asyncio.to_thread(update_incident_status, incident_id, "In Progress")
                     print(f"➡️ Incident {incident_number} status updated to 'In Progress'.")
-
+                
+                # Step 3: Now, process each incident
+                for incident_number, incident_data in new_incidents.items():
+                    incident_id = incident_data["id"]
+                    
                     await asyncio.to_thread(add_incident_history_to_db, incident_number, incident_data, None, None)
                     
                     # Duplicate the resolution logic from the endpoint
@@ -107,7 +110,6 @@ async def monitor_new_incidents():
                     retrieved_sops = await asyncio.to_thread(search_sop_by_query, rag_query)
 
                     # Check and convert any datetime objects in the incident data to a string for JSON serialization
-                    
                     if "timestamp" in incident_data and isinstance(incident_data["timestamp"], datetime):
                         incident_data["timestamp"] = incident_data["timestamp"].isoformat()
 
@@ -121,43 +123,116 @@ async def monitor_new_incidents():
                     
                     llm_plan_dict = await asyncio.to_thread(get_llm_plan, rag_query, retrieved_sops, model=plan_model)
                     
+                    if not llm_plan_dict or not llm_plan_dict.get("steps"):
+                        print(f"⚠️ LLM failed to generate a valid plan for {incident_number}. Marking as Error.")
+                        await asyncio.to_thread(update_incident_status, incident_id, "Error")
+                        await asyncio.to_thread(update_incident_history, incident_number, llm_plan_dict, [])
+                        continue
+                    
                     available_scripts_with_params = await asyncio.to_thread(get_scripts_from_db)
                     resolved_scripts = resolve_scripts(llm_plan_dict, available_scripts_with_params)
                     
-                    final_resolved_scripts = []
+                    executed_scripts = []
+                    accumulated_context = incident_data.copy()
+                    
+                    # ➕ ADDED: Flag to track if any script failed
+                    resolution_failed = False
+
                     for resolved_script in resolved_scripts:
                         script_name = resolved_script.get('script_name')
-                        if script_name:
+                        
+                        if script_name and not resolution_failed:
                             script_details = next((s for s in available_scripts_with_params if s['name'] == script_name), None)
+                            extracted_params = {}
+                            
                             if script_details and script_details.get('params'):
-                                extracted_params = await asyncio.to_thread(extract_parameters_with_llm, incident_data, script_details['params'], model=param_model)
+                                print(f"🔍 Parameters required for '{script_name}'. Extracting...")
+                                extracted_params = await asyncio.to_thread(
+                                    extract_parameters_with_llm, 
+                                    accumulated_context, 
+                                    script_details['params'], 
+                                    model=param_model
+                                )
+
+                                missing_params = []
+                                # ➕ MODIFIED: Check for empty string or None for required params
+                                for param in script_details['params']:
+                                    param_name = param['param_name']
+                                    is_required = param['required']
+                                    has_default = param.get('default_value') is not None
+                                    
+                                    if is_required:
+                                        # Check if parameter is missing OR its value is an empty string/None
+                                        param_value = extracted_params.get(param_name)
+                                        if not param_value:  # This correctly handles None and empty strings
+                                            if has_default:
+                                                extracted_params[param_name] = param['default_value']
+                                                print(f"⚠️ Required parameter '{param_name}' not extracted. Using default value: {param['default_value']}")
+                                            else:
+                                                missing_params.append(param_name)
+
+                                if missing_params:
+                                    error_message = f"❌ Failed to extract required parameters for script '{script_name}': {', '.join(missing_params)}. Cancelling execution."
+                                    print(error_message)
+                                    resolved_script['status'] = "error"
+                                    resolved_script['output'] = error_message
+                                    resolution_failed = True # Set flag to true
+                                
                                 resolved_script['extracted_parameters'] = extracted_params
+                            else:
+                                print(f"✅ No parameters required for '{script_name}'. Skipping extraction.")
 
-                        final_resolved_scripts.append(resolved_script)     
-
-                    # Add detailed logs to see the data before it's sent
-                    print(f"📄 Incident data before adding history: {incident_data}")
-                    print(f"📝 Resolved scripts before adding history: {final_resolved_scripts}")
+                            # If a parameter extraction failure was found, the process should be halted.
+                            if not resolution_failed:
+                                print(f"⚙️ Executing script: '{script_name}' with parameters: {extracted_params}")
+                                
+                                execution_request = ExecuteScriptRequest(
+                                    script_id=str(resolved_script.get('script_id')),
+                                    script_name=script_name,
+                                    parameters=extracted_params
+                                )
+                                
+                                response = execute_script(execution_request)
+                                response_body = json.loads(response.body.decode())
+                                
+                                script_output = response_body.get("output", "No output from script.")
+                                
+                                # ➕ ADDED: Check if the script's output indicates a failure
+                                if "failed to execute" in script_output.lower():
+                                    resolved_script['status'] = "error"
+                                    resolved_script['output'] = script_output
+                                    print(f"❌ Script '{script_name}' reported a failure. Halting resolution process.")
+                                    resolution_failed = True # Set flag to true
+                                else:
+                                    resolved_script['status'] = "success"
+                                    resolved_script['output'] = script_output
+                                    accumulated_context[f"{script_name}_output"] = script_output
+                                    print(f"📝 Script '{script_name}' execution output: {script_output}")
+                            
+                        executed_scripts.append(resolved_script)
                     
+                    print(f"📄 Incident data before updating history: {incident_data}")
+                    print(f"💾 Resolved and executed scripts before updating history: {executed_scripts}")
                     
-
-                    await asyncio.to_thread(update_incident_history, incident_number, llm_plan_dict, final_resolved_scripts)
+                    await asyncio.to_thread(update_incident_history, incident_number, llm_plan_dict, executed_scripts)
                     
-                    # Mark incident as resolved in the database.
-                    await asyncio.to_thread(update_incident_status, incident_id, "Resolved")
-                    print(f"🎉 Resolution complete and incident {incident_number} marked as resolved.")
+                    # ➕ MODIFIED: Final status check based on the resolution_failed flag
+                    if resolution_failed:
+                        await asyncio.to_thread(update_incident_status, incident_id, "Error")
+                        print(f"❗ Resolution process for {incident_number} failed. Incident status updated to 'Error'.")
+                    else:
+                        await asyncio.to_thread(update_incident_status, incident_id, "Resolved")
+                        print(f"🎉 Resolution complete and incident {incident_number} marked as resolved.")
 
             else:
                 print("No new incidents found.")
             
-            # Wait for a fixed period before checking again
-            await asyncio.sleep(60) # Wait for 30 seconds
+            await asyncio.sleep(60)
             
         except Exception as e:
-            # Added more specific exception handling and logging
             print(f"Error in incident monitor: {e}")
             await asyncio.to_thread(update_incident_status, incident_id, "Error")
-            await asyncio.sleep(60) # Wait longer on error to prevent a tight loop
+            await asyncio.sleep(60)
 
 
 @app.post("/ingest")
@@ -186,7 +261,7 @@ def add_script(request: AddScriptRequest):
 @app.get("/search")
 async def search_sop(
     q: str = Query(..., min_length=3),
-    model: str = Query(DEFAULT_MODELS["plan"], description="LLM model for plan generation")  # ✅ optional
+    model: str = Query(DEFAULT_MODELS["plan"], description="LLM model for plan generation")
 ):
     """
     Orchestration Engine: performs RAG, generates LLM plan, maps to scripts.
@@ -195,7 +270,6 @@ async def search_sop(
     if not retrieved_sops:
         return JSONResponse(content={"results": [], "message": "No relevant SOPs found."}, status_code=200)
 
-    # ✅ Pass dynamic model
     llm_plan_dict = get_llm_plan(q, retrieved_sops, model=model)
 
     available_scripts = get_scripts_from_db()
@@ -214,7 +288,7 @@ async def search_sop(
 async def resolve_incident_by_number(
     incident_number: str = Path(..., min_length=3),
     plan_model: str = Query(DEFAULT_MODELS["plan"], description="Model for plan generation"),
-    param_model: str = Query(DEFAULT_MODELS["param_extraction"], description="Model for param extraction")  # ✅
+    param_model: str = Query(DEFAULT_MODELS["param_extraction"], description="Model for param extraction")
 ):
     """
     Incident Orchestration: RAG → LLM plan → Script resolution → Parameter extraction.
@@ -228,7 +302,6 @@ async def resolve_incident_by_number(
     if not retrieved_sops:
         return JSONResponse(content={"results": [], "message": "No relevant SOPs found."}, status_code=200)
 
-    # ✅ use chosen model for plan generation
     llm_plan_dict = get_llm_plan(rag_query, retrieved_sops, model=plan_model)
 
     available_scripts_with_params = get_scripts_from_db()
@@ -240,13 +313,11 @@ async def resolve_incident_by_number(
         if script_name:
             script_details = next((s for s in available_scripts_with_params if s['name'] == script_name), None)
             if script_details and script_details.get('params'):
-                # ✅ use param_model for parameter extraction
                 extracted_params = extract_parameters_with_llm(incident_data, script_details['params'], model=param_model)
                 resolved_script['extracted_parameters'] = extracted_params
 
         final_resolved_scripts.append(resolved_script)
 
-    # ✅ Store the incident resolution history in the database
     add_incident_history_to_db(incident_number, incident_data, llm_plan_dict, final_resolved_scripts)     
 
     return JSONResponse(content={
@@ -272,13 +343,11 @@ def get_scripts():
 def execute_script(request: ExecuteScriptRequest):
     """
     Dummy executor for scripts with:
-    - 10-second artificial delay
-    - 70% success / 30% failure outcome
+    - 5-second artificial delay
+    - 80% success / 20% failure outcome
     """
-    # Simulate execution time
     time.sleep(5)
 
-    # Randomize result
     if random.random() < 0.8:
         return JSONResponse(
             content={
