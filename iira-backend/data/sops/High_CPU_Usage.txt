@@ -1,0 +1,51 @@
+Title: High CPU Usage Due to Unknown Process
+
+Issue:
+System reports sustained high CPU usage, and users are experiencing performance degradation.
+
+Resolution Steps:
+
+1. Identify top CPU-consuming process.
+Script: get_top_process
+Parameters:
+
+metric: cpu
+
+limit: 1
+Output: Returns process_id (PID) of the top CPU-hogging process.
+
+2. Fetch process details for identified PID (from step 1).
+Script: get_process_details
+Parameters:
+
+pid: {output.process_id from step 1}
+Output: Returns process_name, user, cmdline.
+
+3. Check if process is a known safe service or a rogue process.
+Script: verify_process_legitimacy
+Parameters:
+
+process_name: {output.process_name from step 2}
+
+user: {output.user from step 2}
+Output: Returns status (safe/rogue).
+
+4. If rogue, terminate the process.
+Script: kill_process
+Parameters:
+
+pid: {output.process_id from step 1}
+
+signal: 9
+
+5. Verify CPU usage has returned to normal.
+Script: check_cpu_usage
+Parameters:
+
+threshold: 80
+
+Notes:
+
+If the process is a critical service (like postgres or nginx), validate before killing.
+
+Capture logs before terminating for audit purposes.

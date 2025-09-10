@@ -110,7 +110,6 @@ def get_llm_plan(query: str, context: List[Dict], model: str = MODEL_PLAN) -> Di
 
 
 def extract_parameters_with_llm(incident_data: Dict, script_params: List[Dict], model: str = MODEL_PARAMS) -> Dict:
-    # ... (no changes in this function)
     params_to_find = [
         f"param_name: '{p.get('param_name')}', type: '{p.get('param_type')}', required: '{p.get('required')}'"
         for p in script_params if isinstance(p, dict)
@@ -118,20 +117,40 @@ def extract_parameters_with_llm(incident_data: Dict, script_params: List[Dict], 
     params_to_find_str = "\n".join(params_to_find)
 
     prompt = f"""
-    You are an AI assistant tasked with extracting parameters from incident data.
-    
+    You are an AI assistant helping to extract script parameters from incident data.
+    Always produce valid JSON as output — no explanations, no extra text.
+
     Incident Data:
     {json.dumps(incident_data, indent=2)}
-    
+
     Parameters to Extract:
     {params_to_find_str}
-    
-    Response MUST be JSON:
+
+    Extraction Rules:
+    1. Carefully analyze the incident data (short_description, description, cmdb_ci, business_service, notes, 
+    and any previous script outputs if present).
+    2. For each parameter:
+    - If the value is explicitly mentioned, extract it exactly.
+    - If the value can be inferred (e.g., hostname, port, service name), infer it from the incident context.
+    - If the parameter has a default_value (provided separately by the system), you may leave it null here 
+        and the system will backfill it.
+    - If required and not available, return `null` (never invent random values).
+    3. Respect the parameter type:
+    - string → plain text
+    - integer → numeric value
+    - boolean → true/false
+    - path/directory → OS path format
+    4. Do not include extra keys, comments, or explanations in the output.
+    5. If you are unsure, set the value to `null`.
+
+    Output Format (strict JSON only):
     {{
-      "param_name_1": "value1",
-      "param_name_2": "value2"
+    "param_name_1": value1,
+    "param_name_2": value2,
+    ...
     }}
     """
+
 
     response_text = call_ollama(prompt, model=model)
     return extract_json_from_text(response_text) or {}
