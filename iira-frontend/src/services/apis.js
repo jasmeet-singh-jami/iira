@@ -91,3 +91,31 @@ export const fetchHistoryApi = async (page = 1, limit = 10) => {
   }
 };
 
+/**
+ * Deletes an SOP from the backend by its title.
+ * @param {string} title - The title of the SOP to delete.
+ * @returns {Promise<Object>} A promise that resolves to the API response data.
+ */
+export const deleteSOPApi = async (sopId) => {
+    try {
+        const response = await axios.post(`${API_BASE}/api/delete_sop`, {
+            sop_id: sopId
+        });
+        return response.data;
+    } catch (error) {
+        console.error("API Error: Error deleting SOP:", error);
+        throw new Error('Failed to delete SOP. Please check the API server.');
+    }
+};
+
+export const fetchAllSOPsApi = async () => {
+    try {
+        const response = await axios.get(`${API_BASE}/api/sops/all`);
+        return response.data;
+    } catch (error) {
+        console.error("API Error: Error fetching SOPs:", error);
+        throw new Error('Failed to fetch all SOPs. Please check the API server.');
+    }
+};
+
+

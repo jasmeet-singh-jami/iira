@@ -6,19 +6,16 @@ services:
     ports:
       # Map the local port 3000 to the container's port 80 (where Nginx is running)
       - "3000:80"
-    depends_on:
-      - backend
 
   backend:
-    build: ./iira-backend
+    build:
+      context: .                          
+      dockerfile: iira-backend/Dockerfile 
     container_name: python-backend
     ports:
       - "8000:8000"
     env_file:
       - ./iira-backend/.env.docker
-    depends_on:
-      - postgres
-      - qdrant
 
   postgres:
     image: postgres:15
@@ -52,16 +49,14 @@ services:
   #     - ollama_models:/root/.ollama
   #   entrypoint: >
   #     sh -c "
-  #       ollama serve & 
+  #       ollama serve &
   #       echo 'Waiting for Ollama...' &&
   #       until ollama status > /dev/null 2>&1; do sleep 2; done &&
-  #       if ! ollama list | grep -q llama3:latest; then 
-  #         echo 'Pulling llama3:latest...' && ollama pull llama3:latest; 
+  #       if ! ollama list | grep -q llama3:latest; then
+  #         echo 'Pulling llama3:latest...' && ollama pull llama3:latest;
   #       fi &&
   #       wait -n
   #     "
-
-
 
 volumes:
   postgres_data:

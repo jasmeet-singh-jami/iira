@@ -1,4 +1,3 @@
-// src/components/SopIngestion.js
 import React from 'react';
 import { Plus, X, ChevronDown } from 'lucide-react';
 
@@ -20,6 +19,7 @@ const SopIngestion = ({
             <h2 className="text-3xl sm:text-4xl font-extrabold text-blue-800 mb-6 border-b-2 pb-2 border-blue-100">
                 SOP Ingestion
             </h2>
+            
             <div className="space-y-4">
                 <input
                     type="text"
@@ -46,7 +46,6 @@ const SopIngestion = ({
                             className="w-full sm:flex-1 px-4 py-3 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 transition duration-200"
                         />
                         <div className="relative w-full sm:w-auto flex items-center space-x-2">
-                            {/* New container to wrap the select and its icon */}
                             <div className="relative flex-1">
                                 <select
                                     value={step.script}

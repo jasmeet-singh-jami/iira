@@ -5,6 +5,7 @@ import AddNewScriptModal from './components/AddNewScriptModal';
 import SopIngestion from './components/SopIngestion';
 import IncidentResolution from './components/IncidentResolution';
 import History from './components/History';
+import SopDeletion from './components/SopDeletion';
 import { fetchScriptsApi, uploadSOPApi, resolveIncidentApi, executeScriptApi } from './services/apis';
 
 function App() {
@@ -280,6 +281,13 @@ function App() {
                     >
                         SOP Ingestion
                     </button>
+                    {/* ⬅️ New SOP Deletion Tab Button */}
+                    <button
+                        onClick={() => setActiveTab('delete')}
+                        className={`py-3 px-8 text-xl font-bold transition duration-300 focus:outline-none ${activeTab === 'delete' ? 'bg-blue-600 text-white shadow-lg' : 'bg-gray-200 text-gray-700 hover:bg-gray-300'}`}
+                    >
+                        SOP Deletion
+                    </button>
                     {/* ✅ New History Tab Button */}
                     <button
                         onClick={() => setActiveTab('history')}
@@ -317,6 +325,9 @@ function App() {
                         onExecuteAll={onExecuteAll}
                     />
                 )}
+
+                {/* ⬅️ New conditional rendering for the SOP Deletion tab */}
+                {activeTab === 'delete' && <SopDeletion />}
 
                 {/* ✅ Render the new History component */}
                 {activeTab === 'history' && (

@@ -3,7 +3,7 @@
 from fastapi import FastAPI, Path, Query, HTTPException
 from fastapi.responses import JSONResponse
 from fastapi.middleware.cors import CORSMiddleware
-from app.services.embed_documents import embed_and_store_sops
+from app.services.embed_documents import delete_sop_by_id, embed_and_store_sops, get_all_sops
 from app.services.script_resolver import resolve_scripts
 from app.services.search_sop import search_sop_by_query
 
@@ -21,7 +21,8 @@ import time
 import random
 from datetime import datetime
 import json
-
+import os
+import subprocess
 
 # Use an async context manager for startup and shutdown events
 @asynccontextmanager
@@ -77,6 +78,9 @@ class ExecuteScriptRequest(BaseModel):
     script_id: str
     script_name: str
     parameters: Dict[str, Any]      
+
+class SOPDeleteByIDRequest(BaseModel):
+    sop_id: str
 
 async def monitor_new_incidents():
     """
@@ -339,36 +343,69 @@ def get_scripts():
     scripts = get_scripts_from_db()
     return JSONResponse(content={"scripts": scripts})
 
+# iira/app/main.py
+
 @app.post("/execute_script")
 def execute_script(request: ExecuteScriptRequest):
     """
-    Dummy executor for scripts with:
-    - 5-second artificial delay
-    - 80% success / 20% failure outcome
+    Executes a shell script within the container with dynamic parameters.
     """
-    time.sleep(5)
+    try:
+        # Step 1: Fetch the script details from the database
+        script_details = get_script_by_name(request.script_name)
+        if not script_details:
+            raise HTTPException(status_code=404, detail=f"Script '{request.script_name}' not found.")
 
-    if random.random() < 0.8:
-        return JSONResponse(
-            content={
-                "status": "success",
-                "output": (
-                    f"Script {request.script_name} (ID: {request.script_id}) "
-                    f"executed successfully with parameters {request.parameters}"
-                ),
-            },
-            status_code=200,
-        )
-    else:
-        return JSONResponse(
-            content={
-                "status": "error",
-                "output": (
-                    f"Script {request.script_name} (ID: {request.script_id}) "
-                    f"failed to execute with parameters {request.parameters}"
-                ),
-            },
-            status_code=200,
+        script_path = script_details.get('path')
+        if not script_path:
+            raise HTTPException(status_code=500, detail=f"Script path not found for '{request.script_name}'.")
+        
+        # Verify the script file exists in the container
+        if not os.path.exists(script_path):
+            raise HTTPException(status_code=500, detail=f"Script file not found at path: {script_path}")
+
+        # Step 2: Construct the shell command
+        # Make the script executable and then call it
+        os.chmod(script_path, 0o755) 
+        command = [script_path] # The script itself is the command
+
+        # Append parameters. Assumes script can handle named arguments like -name value
+        for param_name, param_value in request.parameters.items():
+            command.append(f"--{param_name}")
+            command.append(str(param_value))
+
+        print(f"Executing command: {' '.join(command)}")
+
+        # Step 3: Execute the command and capture output
+        result = subprocess.run(command, capture_output=True, text=True, check=False)
+        
+        # Step 4: Process the result
+        if result.returncode == 0:
+            return JSONResponse(
+                content={
+                    "status": "success",
+                    "output": result.stdout.strip() or "Script executed successfully with no output."
+                },
+                status_code=200,
+            )
+        else:
+            # Combine stdout and stderr for a complete error message
+            error_output = (result.stdout.strip() + "\n" + result.stderr.strip()).strip()
+            return JSONResponse(
+                content={
+                    "status": "error",
+                    "output": f"Script execution failed. Error: {error_output}"
+                },
+                status_code=200, # Still 200 OK because the API call succeeded, but the script failed
+            )
+
+    except HTTPException as http_exc:
+        raise http_exc # Re-raise known HTTP exceptions
+    except Exception as e:
+        # Catch any other unexpected errors
+        raise HTTPException(
+            status_code=500,
+            detail=f"An error occurred during script execution: {str(e)}"
         )
 
 @app.get("/history")
@@ -385,3 +422,27 @@ def get_incident_history(
     except Exception as e:
         print(f"Error fetching history: {e}")
         raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.get("/sops/all", summary="Get all existing SOPs")
+def get_all_sops_endpoint():
+    sops = get_all_sops()
+    return JSONResponse(content=sops, status_code=200)
+    
+@app.post("/delete_sop", summary="Delete an SOP by ID")
+def delete_sop(request: SOPDeleteByIDRequest):
+    """
+    Deletes an SOP from the Qdrant database by its unique ID.
+    """
+    print(f"Executing delete_sop for ID: {request.sop_id}")
+    deleted_count = delete_sop_by_id(request.sop_id)
+    if deleted_count > 0:
+        return JSONResponse(
+            content={"message": f"SOP with sop_id '{request.sop_id}' deleted successfully."},
+            status_code=200
+        )
+    else:
+        raise HTTPException(
+            status_code=404, 
+            detail=f"No SOP found with the sop_id '{request.sop_id}'."
+        )

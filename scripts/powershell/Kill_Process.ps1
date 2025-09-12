@@ -4,7 +4,7 @@ param(
 )
 
 try {
-    Stop-Process -Id $pid -Force
+    #Stop-Process -Id $pid -Force
     $result = @{
         pid     = $pid
         action  = "terminated"
