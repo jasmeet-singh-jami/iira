@@ -90,144 +90,123 @@ async def monitor_new_incidents():
     while True:
         try:
             print("⏱️ Checking for new unresolved incidents...")
-            # Step 1: Use asyncio.to_thread for the synchronous database call
             new_incidents = await asyncio.to_thread(get_new_unresolved_incidents)
-            
+
             if new_incidents:
                 print(f"✅ Found {len(new_incidents)} new incidents. Triggering resolution.")
-                
-                # Step 2: Immediately update the status of all new incidents to 'In Progress'
-                # This prevents them from being picked up again in the next cycle.
-                for incident_number, incident_data in new_incidents.items():
-                    incident_id = incident_data["id"]
-                    await asyncio.to_thread(update_incident_status, incident_id, "In Progress")
-                    print(f"➡️ Incident {incident_number} status updated to 'In Progress'.")
-                
-                # Step 3: Now, process each incident
-                for incident_number, incident_data in new_incidents.items():
-                    incident_id = incident_data["id"]
-                    
-                    await asyncio.to_thread(add_incident_history_to_db, incident_number, incident_data, None, None)
-                    
-                    # Duplicate the resolution logic from the endpoint
-                    rag_query = f"{incident_data['short_description']} {incident_data['description']}"
-                    retrieved_sops = await asyncio.to_thread(search_sop_by_query, rag_query)
 
-                    # Check and convert any datetime objects in the incident data to a string for JSON serialization
-                    if "timestamp" in incident_data and isinstance(incident_data["timestamp"], datetime):
-                        incident_data["timestamp"] = incident_data["timestamp"].isoformat()
-
-                    if not retrieved_sops:
-                        print(f"❌ No relevant SOPs found for {incident_number}. Skipping.")
-                        await asyncio.to_thread(update_incident_status, incident_id, "Error")
-                        continue
-                    
-                    plan_model = DEFAULT_MODELS["plan"]
-                    param_model = DEFAULT_MODELS["param_extraction"]
-                    
-                    llm_plan_dict = await asyncio.to_thread(get_llm_plan, rag_query, retrieved_sops, model=plan_model)
-                    
-                    if not llm_plan_dict or not llm_plan_dict.get("steps"):
-                        print(f"⚠️ LLM failed to generate a valid plan for {incident_number}. Marking as Error.")
-                        await asyncio.to_thread(update_incident_status, incident_id, "Error")
-                        await asyncio.to_thread(update_incident_history, incident_number, llm_plan_dict, [])
-                        continue
-                    
-                    available_scripts_with_params = await asyncio.to_thread(get_scripts_from_db)
-                    resolved_scripts = resolve_scripts(llm_plan_dict, available_scripts_with_params)
-                    
-                    executed_scripts = []
-                    accumulated_context = incident_data.copy()
-                    
-                    # ➕ ADDED: Flag to track if any script failed
+                for incident_number, incident_data in new_incidents.items():
                     resolution_failed = False
+                    executed_scripts = []
+                    llm_plan_dict = None  # Initialize outside of try block
 
-                    for resolved_script in resolved_scripts:
-                        script_name = resolved_script.get('script_name')
+                    try:
+                        incident_id = incident_data["id"]
+                        await asyncio.to_thread(update_incident_status, incident_id, "In Progress")
+                        print(f"➡️ Incident {incident_number} status updated to 'In Progress'.")
                         
-                        if script_name and not resolution_failed:
-                            script_details = next((s for s in available_scripts_with_params if s['name'] == script_name), None)
-                            extracted_params = {}
-                            
-                            if script_details and script_details.get('params'):
-                                print(f"🔍 Parameters required for '{script_name}'. Extracting...")
-                                extracted_params = await asyncio.to_thread(
-                                    extract_parameters_with_llm, 
-                                    accumulated_context, 
-                                    script_details['params'], 
-                                    model=param_model
-                                )
+                        await asyncio.to_thread(add_incident_history_to_db, incident_number, incident_data, None, None)
+                        
+                        rag_query = f"{incident_data['short_description']} {incident_data['description']}"
+                        retrieved_sops = await asyncio.to_thread(search_sop_by_query, rag_query)
 
-                                missing_params = []
-                                # ➕ MODIFIED: Check for empty string or None for required params
-                                for param in script_details['params']:
-                                    param_name = param['param_name']
-                                    is_required = param['required']
-                                    has_default = param.get('default_value') is not None
+                        if not retrieved_sops:
+                            print(f"❌ No relevant SOPs found for {incident_number}. Skipping.")
+                            resolution_failed = True
+                            continue # Skip the rest of the try block and go to finally
+
+                        llm_plan_dict = await asyncio.to_thread(get_llm_plan, rag_query, retrieved_sops, model=DEFAULT_MODELS["plan"])
+                        
+                        if not llm_plan_dict or not llm_plan_dict.get("steps"):
+                            print(f"⚠️ LLM failed to generate a valid plan for {incident_number}. Marking as Error.")
+                            resolution_failed = True
+                            continue # Skip to finally
+                        
+                        available_scripts_with_params = await asyncio.to_thread(get_scripts_from_db)
+                        resolved_scripts = resolve_scripts(llm_plan_dict, available_scripts_with_params)
+
+                        accumulated_context = incident_data.copy()
+
+                        for resolved_script in resolved_scripts:
+                            script_name = resolved_script.get('script_name')
+                            
+                            if resolution_failed:
+                                resolved_script['status'] = 'skipped'
+                                executed_scripts.append(resolved_script)
+                                continue
+
+                            if script_name:
+                                script_details = next((s for s in available_scripts_with_params if s['name'] == script_name), None)
+                                extracted_params = {}
+
+                                if script_details and script_details.get('params'):
+                                    print(f"🔍 Parameters required for '{script_name}'. Extracting...")
+                                    extracted_params = await asyncio.to_thread(
+                                        extract_parameters_with_llm, 
+                                        accumulated_context, 
+                                        script_details['params'], 
+                                        model=DEFAULT_MODELS["param_extraction"]
+                                    )
                                     
-                                    if is_required:
-                                        # Check if parameter is missing OR its value is an empty string/None
-                                        param_value = extracted_params.get(param_name)
-                                        if not param_value:  # This correctly handles None and empty strings
-                                            if has_default:
-                                                extracted_params[param_name] = param['default_value']
-                                                print(f"⚠️ Required parameter '{param_name}' not extracted. Using default value: {param['default_value']}")
-                                            else:
-                                                missing_params.append(param_name)
+                                    # Parameter validation logic...
+                                    # ... (your existing code for checking missing params)
+                                    missing_params = [
+                                        p['param_name'] for p in script_details['params']
+                                        if p['required'] and not extracted_params.get(p['param_name']) and not p.get('default_value')
+                                    ]
+                                    
+                                    if missing_params:
+                                        error_message = f"❌ Failed to extract required parameters for script '{script_name}': {', '.join(missing_params)}. Cancelling execution."
+                                        print(error_message)
+                                        resolved_script['status'] = "error"
+                                        resolved_script['output'] = error_message
+                                        resolution_failed = True
+                                    
+                                    resolved_script['extracted_parameters'] = extracted_params
 
-                                if missing_params:
-                                    error_message = f"❌ Failed to extract required parameters for script '{script_name}': {', '.join(missing_params)}. Cancelling execution."
-                                    print(error_message)
-                                    resolved_script['status'] = "error"
-                                    resolved_script['output'] = error_message
-                                    resolution_failed = True # Set flag to true
-                                
-                                resolved_script['extracted_parameters'] = extracted_params
-                            else:
-                                print(f"✅ No parameters required for '{script_name}'. Skipping extraction.")
+                                if not resolution_failed:
+                                    print(f"⚙️ Executing script: '{script_name}' with parameters: {extracted_params}")
+                                    
+                                    execution_request = ExecuteScriptRequest(
+                                        script_id=str(resolved_script.get('script_id')),
+                                        script_name=script_name,
+                                        parameters=extracted_params
+                                    )
+                                    
+                                    response = await asyncio.to_thread(execute_script, execution_request)
+                                    response_body = json.loads(response.body.decode())
+                                    
+                                    if response_body.get("status") == "error":
+                                        resolved_script['status'] = "error"
+                                        resolved_script['output'] = response_body.get("output", "Script failed.")
+                                        print(f"❌ Script '{script_name}' reported a failure. Halting resolution process.")
+                                        resolution_failed = True
+                                    else:
+                                        resolved_script['status'] = "success"
+                                        resolved_script['output'] = response_body.get("output", "Script executed successfully with no output.")
+                                        accumulated_context[f"{script_name}_output"] = resolved_script['output']
+                                        print(f"📝 Script '{script_name}' execution output: {resolved_script['output']}")
+                                    
+                                executed_scripts.append(resolved_script)
 
-                            # If a parameter extraction failure was found, the process should be halted.
-                            if not resolution_failed:
-                                print(f"⚙️ Executing script: '{script_name}' with parameters: {extracted_params}")
-                                
-                                execution_request = ExecuteScriptRequest(
-                                    script_id=str(resolved_script.get('script_id')),
-                                    script_name=script_name,
-                                    parameters=extracted_params
-                                )
-                                
-                                response = execute_script(execution_request)
-                                response_body = json.loads(response.body.decode())
-                                
-                                script_output = response_body.get("output", "No output from script.")
-                                
-                                # ➕ ADDED: Check if the script's output indicates a failure
-                                if "failed to execute" in script_output.lower():
-                                    resolved_script['status'] = "error"
-                                    resolved_script['output'] = script_output
-                                    print(f"❌ Script '{script_name}' reported a failure. Halting resolution process.")
-                                    resolution_failed = True # Set flag to true
-                                else:
-                                    resolved_script['status'] = "success"
-                                    resolved_script['output'] = script_output
-                                    accumulated_context[f"{script_name}_output"] = script_output
-                                    print(f"📝 Script '{script_name}' execution output: {script_output}")
-                            
-                        executed_scripts.append(resolved_script)
-                    
-                    print(f"📄 Incident data before updating history: {incident_data}")
-                    print(f"💾 Resolved and executed scripts before updating history: {executed_scripts}")
-                    
-                    await asyncio.to_thread(update_incident_history, incident_number, llm_plan_dict, executed_scripts)
-                    
-                    # ➕ MODIFIED: Final status check based on the resolution_failed flag
-                    if resolution_failed:
-                        await asyncio.to_thread(update_incident_status, incident_id, "Error")
-                        print(f"❗ Resolution process for {incident_number} failed. Incident status updated to 'Error'.")
-                    else:
-                        await asyncio.to_thread(update_incident_status, incident_id, "Resolved")
-                        print(f"🎉 Resolution complete and incident {incident_number} marked as resolved.")
+                    except Exception as e:
+                        print(f"💥 Unhandled error during incident {incident_number} resolution: {e}")
+                        resolution_failed = True
+                        
+                    finally:
+                        # This block will always execute
+                        if llm_plan_dict is not None:
+                             await asyncio.to_thread(update_incident_history, incident_number, llm_plan_dict, executed_scripts)
+                        else:
+                            # In case LLM plan extraction failed, update with an empty plan
+                            await asyncio.to_thread(update_incident_history, incident_number, {"steps": []}, executed_scripts)
 
+                        if resolution_failed:
+                            await asyncio.to_thread(update_incident_status, incident_id, "Error")
+                            print(f"❗ Resolution process for {incident_number} failed. Incident status updated to 'Error'.")
+                        else:
+                            await asyncio.to_thread(update_incident_status, incident_id, "Resolved")
+                            print(f"🎉 Resolution complete and incident {incident_number} marked as resolved.")
             else:
                 print("No new incidents found.")
             
@@ -235,7 +214,6 @@ async def monitor_new_incidents():
             
         except Exception as e:
             print(f"Error in incident monitor: {e}")
-            await asyncio.to_thread(update_incident_status, incident_id, "Error")
             await asyncio.sleep(60)
 
 
@@ -358,8 +336,8 @@ def execute_script(request: ExecuteScriptRequest):
 
         script_path = script_details.get('path')
         if not script_path:
-            raise HTTPException(status_code=500, detail=f"Script path not found for '{request.script_name}'.")
-        
+            raise HTTPException(status_code=500, detail=f"Script path not found for '{request.script_name}'.")       
+
         # Verify the script file exists in the container
         if not os.path.exists(script_path):
             raise HTTPException(status_code=500, detail=f"Script file not found at path: {script_path}")
@@ -369,12 +347,14 @@ def execute_script(request: ExecuteScriptRequest):
         os.chmod(script_path, 0o755) 
         command = [script_path] # The script itself is the command
 
-        # Append parameters. Assumes script can handle named arguments like -name value
-        for param_name, param_value in request.parameters.items():
-            command.append(f"--{param_name}")
-            command.append(str(param_value))
+        # Append parameters.
+        for param in script_details.get('params', []):
+            param_name = param['param_name']
+            param_value = request.parameters.get(param_name)
+            if param_value is not None:
+                command.append(str(param_value))
 
-        print(f"Executing command: {' '.join(command)}")
+        print(f"📄 Executing command: {' '.join(command)}")
 
         # Step 3: Execute the command and capture output
         result = subprocess.run(command, capture_output=True, text=True, check=False)
