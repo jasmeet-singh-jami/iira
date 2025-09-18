@@ -118,4 +118,19 @@ export const fetchAllSOPsApi = async () => {
     }
 };
 
+/**
+ * Function to parse raw text into structured SOP data.
+ * @param {string} document_text - The raw text of the SOP document.
+ * @returns {Promise<Object>} A promise that resolves to the structured SOP data.
+ */
+export const parseSOPApi = async (document_text) => {
+    try {
+        const response = await axios.post(`${API_BASE}/api/parse_sop`, { document_text });
+        return response.data;
+    } catch (error) {
+        console.error("API Error: Error parsing SOP:", error);
+        throw new Error('Failed to parse SOP document. Please check the API server.');
+    }
+};
+
 

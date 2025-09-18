@@ -2,21 +2,23 @@
 import json
 import requests
 import time
-import os
+import re
 from typing import List, Dict, Any
 from app.config import settings
+import json
 
 # Default models to use for different tasks
 DEFAULT_MODELS = {
-    "plan": "llama3:latest",             # SOP step planning
-    "param_extraction": "llama3:latest" 
+    "plan": "llama3:latest",             
+    "param_extraction": "llama3:latest",
+    "sop_parser": "llama3:latest"       
 }
 
 # Default models (can be overridden by environment variables)
 API_URL = settings.ollama_api_url
 MODEL_PLAN = settings.model_plan
 MODEL_PARAMS = settings.model_params
-
+MODEL_SOP_PARSER = settings.model_sop_parser
 
 def call_ollama(prompt: str, model: str) -> str:
     """
@@ -154,3 +156,75 @@ def extract_parameters_with_llm(incident_data: Dict, script_params: List[Dict], 
 
     response_text = call_ollama(prompt, model=model)
     return extract_json_from_text(response_text) or {}
+
+# Function to parse raw text into a structured SOP
+def get_structured_sop_from_llm(document_text: str, available_scripts: List[Dict]) -> Dict:
+    """
+    Uses the LLM to parse raw text into a structured SOP format.
+    """
+    # Use script ID and description
+    scripts_list = [f"- ID: {script['id']} (Description: {script['description']})" for script in available_scripts]
+    scripts_str = "\n".join(scripts_list)
+    print(f"scripts_str: {scripts_str}")    
+    
+    prompt = f"""
+    You are an AI assistant that converts raw Standard Operating Procedure (SOP) text into a structured JSON format.
+    Your task is to parse the raw text and extract the title, issue, and a list of steps. For each step, provide a description and, if a relevant automated script exists, provide its ID.
+    The issue will be the description of the type of issue it will fix and detail of the steps it will perform to fix the issue.
+    Available Scripts:
+    {scripts_str}
+
+    Instructions:
+    1. Always respond with a single JSON object. Do not include any other text, explanations, or markdown.
+    2. The JSON object must have three top-level keys: `title` (string), `issue` (string), and `steps` (array of objects).
+    3. For each step in the `steps` array, use two keys: `description` (string) and **`script_id` (string)**. The description should be detailed.
+    4. **The value for `script_id` MUST be a script's unique ID taken directly and exactly from the "Available Scripts" list. Do not make up a script ID.** 5. Be very conservative about assigning a script ID to `script_id`. Do not use script names from SOP. 
+       If a step has no matching script in Available scripts, set the `script_id` value to `null`.
+    6. Keep the step descriptions concise and focused on the action.
+
+    **Required JSON Output Format:**
+    {{
+    "title": "string",
+    "issue": "string",
+    "steps": [
+        {{
+        "description": "string",
+        "script_id": "string"
+        }}
+    ]
+    }}
+
+    Raw SOP Text:
+    {document_text}
+
+    JSON Output:
+    """
+    
+    print("----------------------------------------")
+    print("📝 Calling LLM to parse SOP...")
+    print(f"Model: {MODEL_SOP_PARSER}")
+    # print(f"Prompt: {prompt}")  # Uncomment for debugging
+    print("----------------------------------------")
+
+    response = call_ollama(prompt, MODEL_SOP_PARSER)
+
+    try:
+        # The LLM's response should be a JSON string, so we need to parse it
+        print(f"LLM Response: {response}")
+        cleaned = extract_json(response)
+        parsed_json = json.loads(cleaned)
+        print(f"✅ Successfully parsed LLM response into JSON.")
+        return parsed_json
+    except json.JSONDecodeError as e:
+        print(f"❌ Failed to decode JSON from LLM response: {e}")
+        print(f"Raw LLM response: {response}")
+        raise ValueError("Invalid JSON response from LLM.")
+    
+def extract_json(response: str) -> str:
+    """
+    Extract the first valid JSON object from a string.
+    """
+    match = re.search(r"\{.*\}", response, re.DOTALL)
+    if match:
+        return match.group(0)
+    raise ValueError("No JSON object found in response.")

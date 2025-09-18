@@ -6,13 +6,14 @@ import SopIngestion from './components/SopIngestion';
 import IncidentResolution from './components/IncidentResolution';
 import History from './components/History';
 import SopDeletion from './components/SopDeletion';
-import { fetchScriptsApi, uploadSOPApi, resolveIncidentApi, executeScriptApi } from './services/apis';
+import { fetchScriptsApi, uploadSOPApi, resolveIncidentApi, executeScriptApi, parseSOPApi } from './services/apis';
 
 function App() {
     // State for the SOP ingestion form
     const [title, setTitle] = useState('');
     const [issue, setIssue] = useState('');
     const [steps, setSteps] = useState([{ description: '', script: '' }]);
+    const [rawText, setRawText] = useState(''); // ✅ Added new state for raw text input
 
     // State for the SOP search functionality
     const [incidentNumber, setIncidentNumber] = useState('');
@@ -28,7 +29,7 @@ function App() {
     const [modal, setModal] = useState({ visible: false, message: '' });
     const [isNewScriptModalOpen, setIsNewScriptModalOpen] = useState(false);
     const [activeTab, setActiveTab] = useState('search');
-    
+
     // State for history tab (new)
     const [incidentHistory, setIncidentHistory] = useState([]);
     const [loadingHistory, setLoadingHistory] = useState(false);
@@ -47,7 +48,40 @@ function App() {
     useEffect(() => {
         fetchScripts();
     }, []);
-    
+
+    const resetSOPSteps = () => {
+        setTitle('');
+        setIssue('');
+        setSteps([{ description: '', script: '' }]);
+        setRawText('');
+        console.log("Form reset successfully.");
+    };
+
+    const handleParseDocument = async () => {
+        if (!rawText.trim()) {
+            setModal({ visible: true, message: 'Please paste some text to parse.' });
+            return;
+        }
+        setLoading(true);
+        try {
+            // The API now returns the resolved data directly
+            const parsedData = await parseSOPApi(rawText);
+
+            setTitle(parsedData.title);
+            setIssue(parsedData.issue);
+            
+            // The steps now include the script_id, so no need for further mapping
+            setSteps(parsedData.steps);
+            
+            setModal({ visible: true, message: 'SOP parsed successfully! Please review the extracted data and make any necessary adjustments before uploading.', onAddSOP: null });
+        } catch (error) {
+            console.error('Error parsing SOP:', error);
+            setModal({ visible: true, message: 'Failed to parse SOP with AI. ' + error.message });
+        } finally {
+            setLoading(false);
+        }
+    };
+
     // ✅ Handle History Tab Fetching
     const fetchHistory = async () => {
         setLoadingHistory(true);
@@ -59,7 +93,7 @@ function App() {
             setLoadingHistory(false);
         }
     };
-    
+
     // We can remove the useEffect that calls fetchHistory on tab change because the History component will handle its own data fetching.
 
     const handleStepChange = (index, field, value) => {
@@ -94,9 +128,7 @@ function App() {
             const sop = { title, issue, steps: validSteps };
             await uploadSOPApi(sop);
             setModal({ visible: true, message: 'SOP ingested successfully!' });
-            setTitle('');
-            setIssue('');
-            setSteps([{ description: '', script: '' }]);
+            resetSOPSteps(); // Reset form after successful upload
         } catch (error) {
             console.error(error.message);
             setModal({ visible: true, message: error.message });
@@ -310,6 +342,11 @@ function App() {
                         availableScripts={availableScripts}
                         setIsNewScriptModalOpen={setIsNewScriptModalOpen}
                         uploadSOP={uploadSOP}
+                        rawText={rawText} 
+                        setRawText={setRawText} 
+                        handleParseDocument={handleParseDocument} 
+                        loading={loading}
+                        resetSOPSteps={resetSOPSteps}
                     />
                 )}
 

@@ -11,6 +11,7 @@ class Settings(BaseSettings):
     ollama_api_url: str
     model_plan: str
     model_params: str
+    model_sop_parser: str
 
     class Config:
         env_file = ".env.local"  # default local env

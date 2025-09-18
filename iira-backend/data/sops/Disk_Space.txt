@@ -1,0 +1,208 @@
+Resolving Disk Space Issues on Production Servers
+
+Document ID: SOP-SRV-002
+Version: 1.1
+
+1. Purpose
+
+To resolve disk space issues in production servers using standardized cleanup scripts that take parameters and provide consistent outputs.
+
+2. Scope
+
+Linux-based production servers (Ubuntu, Debian, CentOS, RHEL).
+
+3. Scripts Overview
+
+Each script below is standalone with:
+
+Inputs: Parameters passed at runtime.
+
+Outputs: Status messages, reports, exit codes.
+
+Logs: Cleanup reports saved under /tmp/.
+
+4. Procedure with Scripts
+Step 1: Check Disk Usage
+
+Script: 
+#!/bin/bash
+# check_disk.sh
+# Usage: ./check_disk.sh [mount_point]
+# Example: ./check_disk.sh /
+
+MOUNT_POINT=${1:-/}
+REPORT_FILE="/tmp/disk_usage_report.txt"
+
+echo "=== Disk Usage Report for $MOUNT_POINT ===" > $REPORT_FILE
+df -hT $MOUNT_POINT >> $REPORT_FILE
+
+echo -e "\n--- Top 10 Largest Directories ---" >> $REPORT_FILE
+sudo du -ahx $MOUNT_POINT | sort -rh | head -n 10 >> $REPORT_FILE
+
+cat $REPORT_FILE
+
+
+✅ Input: mount point (default /)
+✅ Output: /tmp/disk_usage_report.txt with usage + top directories
+
+Step 2: Clean Up Log Files
+
+Script: 
+#!/bin/bash
+# clean_logs.sh
+# Usage: ./clean_logs.sh <log_directory> <retention_days>
+# Example: ./clean_logs.sh /var/log 7
+
+LOG_DIR=${1:-/var/log}
+RETENTION_DAYS=${2:-7}
+REPORT_FILE="/tmp/log_cleanup_report.txt"
+
+echo "=== Log Cleanup for $LOG_DIR (Retention: $RETENTION_DAYS days) ===" > $REPORT_FILE
+
+# Before
+echo -e "\n--- Top 10 Largest Logs Before ---" >> $REPORT_FILE
+sudo du -sh $LOG_DIR/* | sort -rh | head -n 10 >> $REPORT_FILE
+
+# Truncate logs older than retention
+sudo find $LOG_DIR -type f -name "*.log" -mtime +$RETENTION_DAYS -exec truncate -s 0 {} \;
+
+# Journal cleanup
+if command -v journalctl >/dev/null 2>&1; then
+  sudo journalctl --vacuum-time=${RETENTION_DAYS}d >> $REPORT_FILE 2>&1
+fi
+
+# After
+echo -e "\n--- Top 10 Largest Logs After ---" >> $REPORT_FILE
+sudo du -sh $LOG_DIR/* | sort -rh | head -n 10 >> $REPORT_FILE
+
+cat $REPORT_FILE
+
+
+✅ Input: log directory, retention days
+✅ Output: /tmp/log_cleanup_report.txt
+
+Step 3: Clean Up Temporary Files
+
+Script:
+#!/bin/bash
+# clean_tmp.sh
+# Usage: ./clean_tmp.sh <tmp_directory>
+# Example: ./clean_tmp.sh /tmp
+
+TMP_DIR=${1:-/tmp}
+REPORT_FILE="/tmp/tmp_cleanup_report.txt"
+
+echo "=== Cleaning Temporary Directory: $TMP_DIR ===" > $REPORT_FILE
+
+# Before
+echo -e "\n--- Size Before Cleanup ---" >> $REPORT_FILE
+sudo du -sh $TMP_DIR >> $REPORT_FILE
+
+# Cleanup
+sudo rm -rf $TMP_DIR/*
+
+# After
+echo -e "\n--- Size After Cleanup ---" >> $REPORT_FILE
+sudo du -sh $TMP_DIR >> $REPORT_FILE
+
+cat $REPORT_FILE
+
+
+✅ Input: temp directory (default /tmp)
+✅ Output: /tmp/tmp_cleanup_report.txt
+
+Step 4: Clean Up Package Caches
+
+Script:
+#!/bin/bash
+# clean_package_cache.sh
+# Usage: ./clean_package_cache.sh [distro]
+# Example: ./clean_package_cache.sh ubuntu
+
+DISTRO=${1:-ubuntu}
+REPORT_FILE="/tmp/package_cleanup_report.txt"
+
+echo "=== Cleaning Package Cache ($DISTRO) ===" > $REPORT_FILE
+
+if [[ "$DISTRO" == "ubuntu" || "$DISTRO" == "debian" ]]; then
+  sudo apt-get clean >> $REPORT_FILE 2>&1
+  sudo apt-get autoremove -y >> $REPORT_FILE 2>&1
+elif [[ "$DISTRO" == "centos" || "$DISTRO" == "rhel" ]]; then
+  sudo yum clean all >> $REPORT_FILE 2>&1
+  sudo dnf autoremove -y >> $REPORT_FILE 2>&1
+else
+  echo "Unsupported distro: $DISTRO" >> $REPORT_FILE
+  exit 1
+fi
+
+echo "Package cache cleanup completed." >> $REPORT_FILE
+cat $REPORT_FILE
+
+
+✅ Input: distro (ubuntu, debian, centos, rhel)
+✅ Output: /tmp/package_cleanup_report.txt
+
+Step 5: Remove Old Backups / Core Dumps
+
+Script:
+#!/bin/bash
+# clean_backups.sh
+# Usage: ./clean_backups.sh <backup_directory> <days>
+# Example: ./clean_backups.sh /backups 30
+
+BACKUP_DIR=${1:-/backups}
+RETENTION_DAYS=${2:-30}
+REPORT_FILE="/tmp/backup_cleanup_report.txt"
+
+echo "=== Cleaning Backups in $BACKUP_DIR Older than $RETENTION_DAYS days ===" > $REPORT_FILE
+
+# Before
+echo -e "\n--- Backup Size Before ---" >> $REPORT_FILE
+sudo du -sh $BACKUP_DIR >> $REPORT_FILE
+
+# Remove old backups
+sudo find $BACKUP_DIR -type f -name "*.tar.gz" -mtime +$RETENTION_DAYS -exec rm -f {} \;
+
+# Remove core dumps
+sudo find / -type f -name "core.*" -exec rm -f {} \; 2>/dev/null
+
+# After
+echo -e "\n--- Backup Size After ---" >> $REPORT_FILE
+sudo du -sh $BACKUP_DIR >> $REPORT_FILE
+
+cat $REPORT_FILE
+
+
+✅ Input: backup directory, retention days
+✅ Output: /tmp/backup_cleanup_report.txt
+
+Step 6: Verify Space Recovery
+
+Script:
+
+#!/bin/bash
+# verify_disk.sh
+# Usage: ./verify_disk.sh [mount_point]
+# Example: ./verify_disk.sh /
+
+MOUNT_POINT=${1:-/}
+REPORT_FILE="/tmp/disk_verify_report.txt"
+
+echo "=== Disk Usage Verification for $MOUNT_POINT ===" > $REPORT_FILE
+df -hT $MOUNT_POINT >> $REPORT_FILE
+
+cat $REPORT_FILE
+
+
+✅ Input: mount point
+✅ Output: /tmp/disk_verify_report.txt
+
+5. Escalation
+
+If disk usage is still > 85% after cleanup → escalate to Storage/Infra for disk expansion (handled manually).
+
+6. References
+
+Linux File System Admin Guide
+
+Backup Retention Policy

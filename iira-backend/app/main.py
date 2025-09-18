@@ -4,13 +4,13 @@ from fastapi import FastAPI, Path, Query, HTTPException
 from fastapi.responses import JSONResponse
 from fastapi.middleware.cors import CORSMiddleware
 from app.services.embed_documents import delete_sop_by_id, embed_and_store_sops, get_all_sops
-from app.services.script_resolver import resolve_scripts
+from app.services.script_resolver import resolve_scripts, resolve_scripts_by_id
 from app.services.search_sop import search_sop_by_query
 
 from app.services.scripts import get_scripts_from_db, add_script_to_db, get_script_by_name, add_incident_history_to_db, update_incident_history
 from app.services.history import get_incident_history_from_db_paginated
 from app.services.incidents import get_new_unresolved_incidents, update_incident_status, fetch_incident_by_number
-from app.services.llm_client import get_llm_plan, extract_parameters_with_llm, DEFAULT_MODELS
+from app.services.llm_client import get_llm_plan, extract_parameters_with_llm, DEFAULT_MODELS, get_structured_sop_from_llm
 
 from pydantic import BaseModel
 from typing import List, Dict, Optional, Any
@@ -81,6 +81,9 @@ class ExecuteScriptRequest(BaseModel):
 
 class SOPDeleteByIDRequest(BaseModel):
     sop_id: str
+
+class SOPParseRequest(BaseModel):
+    document_text: str    
 
 async def monitor_new_incidents():
     """
@@ -426,3 +429,50 @@ def delete_sop(request: SOPDeleteByIDRequest):
             status_code=404, 
             detail=f"No SOP found with the sop_id '{request.sop_id}'."
         )
+
+@app.post("/parse_sop", summary="Parse raw SOP text into structured JSON using AI")
+def parse_sop_endpoint(request: SOPParseRequest):
+    """
+    Takes a block of raw text and uses an LLM to parse it into a structured SOP format,
+    mapping steps to available scripts.
+    """    
+    document_text = request.document_text
+    
+    try:
+        # Step 1: Fetch all available scripts from the database
+        available_scripts = get_scripts_from_db()
+        print(f"Found {len(available_scripts)} scripts available for parsing.")
+        
+        # Step 2: Call the LLM with a detailed prompt to get the initial plan
+        # Note: The LLM output's 'steps' contain a 'tool' field, which is the script name.
+        llm_plan = get_structured_sop_from_llm(document_text, available_scripts)
+        print(f"Step 2 completed.")
+        print(f"Final llm_plan: {llm_plan}")
+
+        # Step 3: Resolve the LLM's planned scripts to real, available scripts and get their IDs
+        resolved_workflow = resolve_scripts_by_id(llm_plan, available_scripts)
+        print(f"Step 3 completed.")
+        # Step 4: Construct the final response
+        # Create a new dictionary to hold the final, structured SOP
+        final_sop = {
+            "title": llm_plan.get("title", ""),
+            "issue": llm_plan.get("issue", ""),
+            "steps": []
+        }
+        print(f"Step 4 completed.")
+        # Iterate through the resolved workflow to populate the steps with script names and IDs
+        for step in resolved_workflow:
+            final_sop["steps"].append({
+                "description": step.get("step_description", ""),
+                "script": step.get("script_name"),
+                "script_id": step.get("script_id")
+            })
+
+        return JSONResponse(content=final_sop, status_code=200)
+
+    except HTTPException:
+        # Re-raise HTTPExceptions as they are already properly formatted
+        raise
+    except Exception as e:
+        print(f"Error during SOP parsing: {e}")
+        raise HTTPException(status_code=500, detail=f"An error occurred during AI parsing: {str(e)}")

@@ -31,6 +31,17 @@ def resolve_scripts(llm_plan, available_scripts):
     for step in llm_plan.get("steps", []):
         tool_name = step.get("tool")
         step_description = step.get("description")
+
+        # If the LLM did not suggest a tool, skip the matching logic.
+        if not tool_name:
+            resolved_workflow.append({
+                "script_id": None, # Use None instead of "Not Found" for consistency
+                "step_description": step_description,
+                "script_name": None,
+                "parameters": []
+            })
+            continue # Move to the next step in the loop
+
         
         # Initialize a placeholder for the best-matched script
         best_match = None
@@ -71,6 +82,50 @@ def resolve_scripts(llm_plan, available_scripts):
         else:
             # If no suitable script is found, we still want to show the LLM's step
             # so the user can see what needs to be done manually.
+            resolved_workflow.append({
+                "script_id": "Not Found",
+                "step_description": step_description,
+                "script_name": None,
+                "parameters": []
+            })
+            
+    print("\n----------------------------------------")
+    print("Script resolution complete.")
+    print(f"Final resolved workflow: {resolved_workflow}")
+    print("----------------------------------------")
+    return resolved_workflow
+
+# iira/app/services/script_resolver.py
+
+def resolve_scripts_by_id(llm_plan, available_scripts):
+    """
+    Resolves the LLM's planned tools to actual, available scripts.
+    """
+    print(f"🕵️  Attempting to resolve LLM plan: {llm_plan}")
+
+    print("----------------------------------------")
+    print("Starting script resolution process...")
+    # Create a dictionary for quick lookup by ID
+    scripts_by_id = {str(s['id']): s for s in available_scripts}
+    print("----------------------------------------")
+
+    resolved_workflow = []
+    
+    for step in llm_plan.get("steps", []):
+        script_id = step.get("script_id")
+        step_description = step.get("description")
+
+        best_match = scripts_by_id.get(str(script_id))
+        
+        if best_match:
+            resolved_workflow.append({
+                "script_id": best_match['id'],
+                "step_description": step_description,
+                "script_name": best_match['name'],
+                "parameters": best_match.get('params', [])
+            })
+        else:
+            # If no suitable script is found, we still want to show the LLM's step
             resolved_workflow.append({
                 "script_id": "Not Found",
                 "step_description": step_description,
