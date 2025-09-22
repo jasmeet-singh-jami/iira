@@ -1,5 +1,5 @@
-import React from 'react';
-import { Plus, X, ChevronDown, Wand2, RefreshCcw, Loader2 } from 'lucide-react';
+import React, { useState } from 'react';
+import { Plus, X, ChevronDown, Wand2, RefreshCcw, Loader2, Pencil } from 'lucide-react';
 
 
 const SopIngestion = ({
@@ -12,7 +12,8 @@ const SopIngestion = ({
     addStep,
     removeStep,
     availableScripts,
-    setIsNewScriptModalOpen,
+    onAddNewScript, // Changed from setIsNewScriptModalOpen
+    onEditScript,   // New prop to handle editing
     uploadSOP,
     rawText,
     setRawText,
@@ -20,6 +21,17 @@ const SopIngestion = ({
     loading,
     resetSOPSteps
 }) => {
+    // State to track which script is selected in the new "edit" dropdown
+    const [scriptIdToEdit, setScriptIdToEdit] = useState('');
+
+    // Handler to find the selected script object and pass it to the parent
+    const handleEditScript = () => {
+        if (!scriptIdToEdit) return;
+        const script = availableScripts.find(s => s.id === scriptIdToEdit);
+        if (script) {
+            onEditScript(script);
+        }
+    };
 
     return (
         <div>
@@ -27,7 +39,7 @@ const SopIngestion = ({
                 SOP Ingestion
             </h2>
 
-            {/* ✅ New section for AI-powered parsing */}
+            {/* AI Parsing Section... no changes needed here */}
             <div className="bg-blue-50 p-6 rounded-xl border border-blue-200 mb-6 shadow-inner">
                 <h3 className="text-xl font-bold text-blue-700 mb-3 flex items-center">
                     <Wand2 className="h-6 w-6 mr-2" /> AI-Powered SOP Parsing
@@ -87,22 +99,19 @@ const SopIngestion = ({
                             <input
                                 type="text"
                                 placeholder="Step Description"
-                                value={step.description}
+                                value={step.description || ''}
                                 onChange={e => handleStepChange(index, 'description', e.target.value)}
                                 className="w-full px-4 py-3 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 transition duration-200"
                             />
                             <div className="relative flex items-center space-x-2">
                                 <div className="relative flex-grow">
                                     <select
-                                        // ✅ The 'value' should now be the 'script_id'
                                         value={step.script_id || ''}
-                                        // The 'onChange' handler should update the 'script_id'
                                         onChange={e => handleStepChange(index, 'script_id', e.target.value)}
                                         className="block w-full px-4 py-3 border border-gray-300 rounded-lg pr-10 focus:outline-none focus:ring-2 focus:ring-blue-500 bg-white appearance-none transition duration-200"
                                     >
                                         <option value="">Select a Script (Optional)</option>
                                         {availableScripts.map(script => (
-                                            // ✅ The 'value' of the option should be the script.id
                                             <option key={script.id} value={script.id}>{script.name}</option>
                                         ))}
                                     </select>
@@ -110,7 +119,7 @@ const SopIngestion = ({
                                         <ChevronDown className="h-4 w-4" />
                                     </div>
                                 </div>
-                                <button onClick={() => setIsNewScriptModalOpen(true)} className="p-2 bg-blue-100 text-blue-600 rounded-full shadow-md hover:bg-blue-200 transition duration-200 flex-shrink-0" title="Add New Script">
+                                <button onClick={onAddNewScript} className="p-2 bg-blue-100 text-blue-600 rounded-full shadow-md hover:bg-blue-200 transition duration-200 flex-shrink-0" title="Add New Script">
                                     <Plus size={20} />
                                 </button>
                             </div>
@@ -118,9 +127,35 @@ const SopIngestion = ({
                         {steps.length > 1 && (<button onClick={() => removeStep(index)} className="p-2 bg-red-100 text-red-600 rounded-full shadow-md hover:bg-red-200 transition duration-200" ><X size={20} /></button>)}
                     </div>
                 ))}
-                <button onClick={addStep} className="flex items-center px-4 py-2 bg-green-500 text-white font-semibold rounded-lg shadow-md hover:bg-green-600 transition duration-300 mt-4" >
-                    <Plus size={20} className="mr-2" /> Add Step
-                </button>
+                {/* --- NEW SECTION for adding and editing scripts --- */}
+                <div className="flex items-center space-x-4 mt-4 pt-4 border-t">
+                    <button onClick={addStep} className="flex items-center px-4 py-2 bg-green-500 text-white font-semibold rounded-lg shadow-md hover:bg-green-600 transition duration-300" >
+                        <Plus size={20} className="mr-2" /> Add Step
+                    </button>
+                    
+                    <div className="flex items-center space-x-2 border-l pl-4">
+                        <select
+                            value={scriptIdToEdit}
+                            onChange={(e) => setScriptIdToEdit(e.target.value)}
+                            className="block w-full px-4 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 bg-white transition duration-200"
+                        >
+                            <option value="">Select script to edit...</option>
+                            {availableScripts.map((script) => (
+                                <option key={script.id} value={script.id}>
+                                    {script.name}
+                                </option>
+                            ))}
+                        </select>
+                        <button
+                            onClick={handleEditScript}
+                            disabled={!scriptIdToEdit}
+                            className="flex items-center px-4 py-2 bg-yellow-500 text-white font-semibold rounded-lg shadow-md hover:bg-yellow-600 transition duration-300 disabled:bg-gray-300 disabled:cursor-not-allowed whitespace-nowrap"
+                        >
+                            <Pencil size={18} className="mr-2" /> Edit Script
+                        </button>
+                    </div>
+                </div>
+                {/* --- END NEW SECTION --- */}
             </div>
             <button onClick={uploadSOP} className="w-full sm:w-auto mt-6 px-8 py-3 bg-blue-600 text-white font-bold rounded-lg shadow-lg hover:bg-blue-700 transition duration-300" >
                 Upload SOP

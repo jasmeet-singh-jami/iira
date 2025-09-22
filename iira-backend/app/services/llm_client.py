@@ -35,7 +35,7 @@ def call_ollama(prompt: str, model: str) -> str:
                 API_URL,
                 headers={"Content-Type": "application/json"},
                 data=json.dumps(payload),
-                timeout=60
+                timeout=360
             )
             response.raise_for_status()
             response_json = response.json()
@@ -165,7 +165,6 @@ def get_structured_sop_from_llm(document_text: str, available_scripts: List[Dict
     # Use script ID and description
     scripts_list = [f"- ID: {script['id']} (Description: {script['description']})" for script in available_scripts]
     scripts_str = "\n".join(scripts_list)
-    print(f"scripts_str: {scripts_str}")    
     
     prompt = f"""
     You are an AI assistant that converts raw Standard Operating Procedure (SOP) text into a structured JSON format.

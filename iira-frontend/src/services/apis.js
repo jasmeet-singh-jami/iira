@@ -133,4 +133,22 @@ export const parseSOPApi = async (document_text) => {
     }
 };
 
+/**
+ * Updates an existing script in the backend.
+ * @param {Object} scriptData - The full script object, including its ID.
+ * @returns {Promise<Object>} A promise that resolves to the API response data.
+ */
+export const updateScriptApi = async (scriptData) => {
+    try {
+        // Use a PUT request to the new /api/scripts/update endpoint
+        const response = await axios.put(`${API_BASE}/api/scripts/update`, scriptData);
+        return response.data;
+    } catch (error) {
+        console.error("API Error: Error updating script:", error);
+        // Provide more specific error feedback from the backend if possible
+        const errorMessage = error.response?.data?.detail || 'Failed to update script. Please check the API server.';
+        throw new Error(errorMessage);
+    }
+};
+
 

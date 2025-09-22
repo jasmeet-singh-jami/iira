@@ -1,3 +1,37 @@
-venv/
-.env
 __pycache__/
+*.pyc
+*.pyo
+*.pyd
+*.db
+*.sqlite3
+*.log
+*.csv
+*.parquet
+*.npy
+*.npz
+*.pt
+*.pth
+*.h5
+*.onnx
+*.joblib
+*.pickle
+*.pkl
+
+# Local environments
+.env
+.env.*
+venv/
+.venv/
+
+# IDE/editor
+.DS_Store
+.idea
+.vscode
+
+# Tests
+tests/
+
+# Hugging Face / model caches
+huggingface/
+transformers_cache/
+sentence_transformers/

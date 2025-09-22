@@ -1,35 +1,51 @@
-FROM python:3.10-slim
+# ============================
+# Stage 1 - Build dependencies
+# ============================
+FROM python:3.10-slim AS builder
 
-# Set working directory
 WORKDIR /app
 
-# Install system dependencies (added procps, gawk, bc, coreutils)
+# Install build dependencies
 RUN apt-get update && apt-get install -y --no-install-recommends \
     build-essential \
     libpq-dev \
+    gcc \
+ && rm -rf /var/lib/apt/lists/*
+
+# Copy requirements first (for better caching)
+COPY iira-backend/requirements.txt .
+
+# Install Python deps into a clean folder
+RUN pip install --no-cache-dir --prefix=/install -r requirements.txt
+
+
+# ============================
+# Stage 2 - Runtime image
+# ============================
+FROM python:3.10-slim
+
+WORKDIR /app
+
+# Install only runtime dependencies (small footprint)
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    libpq5 \
     procps \
     gawk \
     bc \
     coreutils \
-    vim \
  && rm -rf /var/lib/apt/lists/*
 
-# Copy only the requirements file first to leverage Docker cache
-COPY iira-backend/requirements.txt .
+# Copy installed Python packages from builder
+COPY --from=builder /install /usr/local
 
-# Install dependencies
-RUN pip install --no-cache-dir -r requirements.txt
-
-# Copy the backend application code
+# Copy application code
 COPY ./iira-backend/ /app/
-
-# Copy the scripts directory into the container
 COPY ./scripts/ /app/scripts/
 
 # Ensure shell scripts are executable
 RUN chmod +x /app/scripts/shell/*.sh
 
-# Expose port for FastAPI
+# Expose FastAPI port
 EXPOSE 8000
 
 # Run FastAPI with uvicorn

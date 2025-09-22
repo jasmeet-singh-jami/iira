@@ -2,6 +2,7 @@ services:
   frontend:
     build:
       context: ./iira-frontend
+    image: iira/iira-frontend:1.0
     container_name: react-frontend
     ports:
       # Map the local port 3000 to the container's port 80 (where Nginx is running)
@@ -11,6 +12,7 @@ services:
     build:
       context: .                          
       dockerfile: iira-backend/Dockerfile 
+    image: iira/iira-backend:1.0
     container_name: python-backend
     ports:
       - "8000:8000"

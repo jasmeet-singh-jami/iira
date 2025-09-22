@@ -28,6 +28,7 @@ def embed_and_store_sops(sops):
         )
 
     points = []
+    print(f"📄 Executing embed_and_store_sops function")
     for sop in sops:
         content = f"{sop['title']} {sop['issue']} " + " ".join(step["description"] for step in sop["steps"])
         vector = embedder.encode(content).tolist()
@@ -37,7 +38,7 @@ def embed_and_store_sops(sops):
             payload=sop
         )
         points.append(point)
-
+    print(f"📄 Exiting embed_and_store_sops function")
     qdrant_client.upsert(collection_name=COLLECTION_NAME, points=points)
 
 

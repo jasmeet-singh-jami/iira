@@ -13,7 +13,7 @@ function App() {
     const [title, setTitle] = useState('');
     const [issue, setIssue] = useState('');
     const [steps, setSteps] = useState([{ description: '', script: '' }]);
-    const [rawText, setRawText] = useState(''); // ✅ Added new state for raw text input
+    const [rawText, setRawText] = useState(''); 
 
     // State for the SOP search functionality
     const [incidentNumber, setIncidentNumber] = useState('');
@@ -27,7 +27,10 @@ function App() {
     // Global state
     const [availableScripts, setAvailableScripts] = useState([]);
     const [modal, setModal] = useState({ visible: false, message: '' });
-    const [isNewScriptModalOpen, setIsNewScriptModalOpen] = useState(false);
+    
+    const [isScriptModalOpen, setIsScriptModalOpen] = useState(false);
+    const [scriptToEdit, setScriptToEdit] = useState(null);
+    
     const [activeTab, setActiveTab] = useState('search');
 
     // State for history tab (new)
@@ -49,6 +52,23 @@ function App() {
         fetchScripts();
     }, []);
 
+    const handleOpenAddScriptModal = () => {
+        setScriptToEdit(null);
+        setIsScriptModalOpen(true);
+    };
+
+    const handleOpenEditScriptModal = (script) => {
+        setScriptToEdit(script);
+        setIsScriptModalOpen(true);
+    };
+    
+    const handleCloseScriptModal = () => {
+        setIsScriptModalOpen(false);
+        setTimeout(() => {
+            setScriptToEdit(null);
+        }, 300);
+    };
+
     const resetSOPSteps = () => {
         setTitle('');
         setIssue('');
@@ -64,15 +84,10 @@ function App() {
         }
         setLoading(true);
         try {
-            // The API now returns the resolved data directly
             const parsedData = await parseSOPApi(rawText);
-
             setTitle(parsedData.title);
             setIssue(parsedData.issue);
-            
-            // The steps now include the script_id, so no need for further mapping
             setSteps(parsedData.steps);
-            
             setModal({ visible: true, message: 'SOP parsed successfully! Please review the extracted data and make any necessary adjustments before uploading.', onAddSOP: null });
         } catch (error) {
             console.error('Error parsing SOP:', error);
@@ -82,25 +97,25 @@ function App() {
         }
     };
 
-    // ✅ Handle History Tab Fetching
-    const fetchHistory = async () => {
-        setLoadingHistory(true);
-        try {
-            // This is now handled within the History component
-        } catch (error) {
-            setHistoryModal({ visible: true, message: 'Failed to load history: ' + error.message });
-        } finally {
-            setLoadingHistory(false);
-        }
-    };
-
-    // We can remove the useEffect that calls fetchHistory on tab change because the History component will handle its own data fetching.
-
+    // --- MODIFICATION: Update both script_id and script name on change ---
     const handleStepChange = (index, field, value) => {
         const updatedSteps = [...steps];
-        updatedSteps[index][field] = value;
+        
+        // If the user is changing the script selection from the dropdown
+        if (field === 'script_id') {
+            const selectedScript = availableScripts.find(s => s.id === value);
+            
+            // Update both the script_id for the UI and the script name for the payload
+            updatedSteps[index]['script_id'] = value;
+            updatedSteps[index]['script'] = selectedScript ? selectedScript.name : null; 
+        } else {
+            // For other fields like 'description', update directly
+            updatedSteps[index][field] = value;
+        }
+        
         setSteps(updatedSteps);
     };
+    // --- END MODIFICATION ---
 
     const addStep = () => {
         setSteps([...steps, { description: '', script: '' }]);
@@ -111,29 +126,48 @@ function App() {
         setSteps(updatedSteps);
     };
 
+    // --- MODIFICATION: Add validation and create a clean payload ---
     const uploadSOP = async () => {
         if (!title.trim() || !issue.trim()) {
             setModal({ visible: true, message: 'Title and Issue cannot be empty.' });
             return;
         }
 
-        const validSteps = steps.filter(step => step.description.trim() && step.script.trim());
-
-        if (validSteps.length === 0) {
-            setModal({ visible: true, message: 'Please provide at least one valid step with a description and a selected script.' });
+        // 1. Validation: Check if any step was left unresolved after AI parsing.
+        const unresolvedStep = steps.find(step => step.script_id === 'Not Found');
+        if (unresolvedStep) {
+            setModal({ 
+                visible: true, 
+                message: `Please select a script for all steps. The step starting with "${unresolvedStep.description.substring(0, 40)}..." is missing a script.` 
+            });
             return;
         }
 
+        // 2. A step is valid if it has a description. It doesn't need a script (manual step).
+        const validSteps = steps.filter(step => step.description.trim());
+
+        if (validSteps.length === 0) {
+            setModal({ visible: true, message: 'Please provide at least one step with a description.' });
+            return;
+        }
+
+        // 3. Create the final payload, ensuring we only send the fields the backend expects.
+        const payloadSteps = validSteps.map(({ description, script }) => ({
+            description,
+            script: script || null // Ensure script is null if it's empty/undefined
+        }));
+
         try {
-            const sop = { title, issue, steps: validSteps };
+            const sop = { title, issue, steps: payloadSteps };
             await uploadSOPApi(sop);
             setModal({ visible: true, message: 'SOP ingested successfully!' });
-            resetSOPSteps(); // Reset form after successful upload
+            resetSOPSteps();
         } catch (error) {
             console.error(error.message);
             setModal({ visible: true, message: error.message });
         }
     };
+    // --- END MODIFICATION ---
 
     const switchToIngestTab = () => {
         setActiveTab('ingest');
@@ -145,14 +179,11 @@ function App() {
             setModal({ visible: true, message: 'Please enter an incident number.' });
             return;
         }
-
         setLoading(true);
         setIncidentDetails(null);
         setResolvedScripts([]);
-
         try {
             const incidentResults = await resolveIncidentApi(incidentNumber);
-
             if (incidentResults.resolved_scripts && incidentResults.resolved_scripts.length > 0) {
                 setIncidentDetails(incidentResults.incident_data);
                 setResolvedScripts(
@@ -175,44 +206,22 @@ function App() {
     };
 
     const executeScript = async (scriptToExecute, scriptIndex) => {
-        // Update status to 'running'
         setResolvedScripts(prev => {
             const updatedScripts = [...prev];
-            updatedScripts[scriptIndex] = {
-                ...updatedScripts[scriptIndex],
-                executionStatus: 'running',
-                output: 'Executing...'
-            };
+            updatedScripts[scriptIndex] = { ...updatedScripts[scriptIndex], executionStatus: 'running', output: 'Executing...' };
             return updatedScripts;
         });
-
         try {
-            const response = await executeScriptApi(
-                scriptToExecute.script_id,
-                scriptToExecute.script_name,
-                scriptToExecute.extracted_parameters
-            );
-
-            // Update status based on API response
+            const response = await executeScriptApi(scriptToExecute.script_id, scriptToExecute.script_name, scriptToExecute.extracted_parameters);
             setResolvedScripts(prev => {
                 const updatedScripts = [...prev];
-                updatedScripts[scriptIndex] = {
-                    ...updatedScripts[scriptIndex],
-                    executionStatus: response.status === 'success' ? 'success' : 'error',
-                    output: response.output
-                };
+                updatedScripts[scriptIndex] = { ...updatedScripts[scriptIndex], executionStatus: response.status === 'success' ? 'success' : 'error', output: response.output };
                 return updatedScripts;
             });
-
         } catch (error) {
-            // Update status to 'error' on API call failure
             setResolvedScripts(prev => {
                 const updatedScripts = [...prev];
-                updatedScripts[scriptIndex] = {
-                    ...updatedScripts[scriptIndex],
-                    executionStatus: 'error',
-                    output: error.message
-                };
+                updatedScripts[scriptIndex] = { ...updatedScripts[scriptIndex], executionStatus: 'error', output: error.message };
                 return updatedScripts;
             });
         }
@@ -220,80 +229,41 @@ function App() {
 
     const onExecuteAll = async () => {
         setIsExecutingAll(true);
-
-        // Work with a copy of the current resolvedScripts state
         let currentScripts = [...resolvedScripts];
-
-        // Check for missing required parameters before starting execution
         for (let i = 0; i < currentScripts.length; i++) {
             const script = currentScripts[i];
-            const missingRequiredParam = script.parameters.find(
-                param => param.required && !script.extracted_parameters?.[param.param_name]
-            );
-
+            const missingRequiredParam = script.parameters.find(p => p.required && !script.extracted_parameters?.[p.param_name]);
             if (missingRequiredParam) {
-                setModal({
-                    visible: true,
-                    message: `Cannot execute all scripts. The workflow stopped at step ${i + 1} because a required parameter "${missingRequiredParam.param_name}" is missing.`
-                });
+                setModal({ visible: true, message: `Cannot execute all scripts. Workflow stopped at step ${i + 1} because a required parameter "${missingRequiredParam.param_name}" is missing.` });
                 setIsExecutingAll(false);
                 return;
             }
         }
-
-        // Execute scripts sequentially
         for (let i = 0; i < currentScripts.length; i++) {
             const script = currentScripts[i];
-
-            // Skip scripts that already succeeded (optional, depending on your requirements)
-            if (script.executionStatus === 'success') {
-                continue;
-            }
-
-            // Update status to 'running'
+            if (script.executionStatus === 'success') continue;
             setResolvedScripts(prev => {
                 const newScripts = [...prev];
                 newScripts[i] = { ...newScripts[i], executionStatus: 'running', output: 'Executing...' };
                 return newScripts;
             });
-
             try {
-                const response = await executeScriptApi(
-                    script.script_id,
-                    script.script_name,
-                    script.extracted_parameters
-                );
-
-                // Update status and output based on API response
+                const response = await executeScriptApi(script.script_id, script.script_name, script.extracted_parameters);
                 setResolvedScripts(prev => {
                     const newScripts = [...prev];
-                    newScripts[i] = {
-                        ...newScripts[i],
-                        executionStatus: response.status === 'success' ? 'success' : 'error',
-                        output: response.output
-                    };
+                    newScripts[i] = { ...newScripts[i], executionStatus: response.status === 'success' ? 'success' : 'error', output: response.output };
                     return newScripts;
                 });
-
-                // Stop execution if a script fails
-                if (response.status === 'error') {
-                    break;
-                }
+                if (response.status === 'error') break;
             } catch (error) {
-                // Handle API call failure
                 setResolvedScripts(prev => {
                     const newScripts = [...prev];
-                    newScripts[i] = {
-                        ...newScripts[i],
-                        executionStatus: 'error',
-                        output: error.message
-                    };
+                    newScripts[i] = { ...newScripts[i], executionStatus: 'error', output: error.message };
                     return newScripts;
                 });
                 break;
             }
         }
-
         setIsExecutingAll(false);
     };
 
@@ -301,30 +271,16 @@ function App() {
         <div className="bg-gray-50 min-h-screen p-4 sm:p-8 font-sans antialiased text-gray-800">
             <div className="container mx-auto max-w-4xl bg-white p-6 sm:p-8 rounded-3xl shadow-xl border border-gray-200">
                 <div className="flex justify-center mb-8">
-                    <button
-                        onClick={() => setActiveTab('search')}
-                        className={`py-3 px-8 text-xl font-bold rounded-l-full transition duration-300 focus:outline-none ${activeTab === 'search' ? 'bg-blue-600 text-white shadow-lg' : 'bg-gray-200 text-gray-700 hover:bg-gray-300'}`}
-                    >
+                    <button onClick={() => setActiveTab('search')} className={`py-3 px-8 text-xl font-bold rounded-l-full transition duration-300 focus:outline-none ${activeTab === 'search' ? 'bg-blue-600 text-white shadow-lg' : 'bg-gray-200 text-gray-700 hover:bg-gray-300'}`}>
                         Resolve Incident
                     </button>
-                    <button
-                        onClick={() => setActiveTab('ingest')}
-                        className={`py-3 px-8 text-xl font-bold transition duration-300 focus:outline-none ${activeTab === 'ingest' ? 'bg-blue-600 text-white shadow-lg' : 'bg-gray-200 text-gray-700 hover:bg-gray-300'}`}
-                    >
+                    <button onClick={() => setActiveTab('ingest')} className={`py-3 px-8 text-xl font-bold transition duration-300 focus:outline-none ${activeTab === 'ingest' ? 'bg-blue-600 text-white shadow-lg' : 'bg-gray-200 text-gray-700 hover:bg-gray-300'}`}>
                         SOP Ingestion
                     </button>
-                    {/* ⬅️ New SOP Deletion Tab Button */}
-                    <button
-                        onClick={() => setActiveTab('delete')}
-                        className={`py-3 px-8 text-xl font-bold transition duration-300 focus:outline-none ${activeTab === 'delete' ? 'bg-blue-600 text-white shadow-lg' : 'bg-gray-200 text-gray-700 hover:bg-gray-300'}`}
-                    >
+                    <button onClick={() => setActiveTab('delete')} className={`py-3 px-8 text-xl font-bold transition duration-300 focus:outline-none ${activeTab === 'delete' ? 'bg-blue-600 text-white shadow-lg' : 'bg-gray-200 text-gray-700 hover:bg-gray-300'}`}>
                         SOP Deletion
                     </button>
-                    {/* ✅ New History Tab Button */}
-                    <button
-                        onClick={() => setActiveTab('history')}
-                        className={`py-3 px-8 text-xl font-bold rounded-r-full transition duration-300 focus:outline-none ${activeTab === 'history' ? 'bg-blue-600 text-white shadow-lg' : 'bg-gray-200 text-gray-700 hover:bg-gray-300'}`}
-                    >
+                    <button onClick={() => setActiveTab('history')} className={`py-3 px-8 text-xl font-bold rounded-r-full transition duration-300 focus:outline-none ${activeTab === 'history' ? 'bg-blue-600 text-white shadow-lg' : 'bg-gray-200 text-gray-700 hover:bg-gray-300'}`}>
                         History
                     </button>
                 </div>
@@ -340,7 +296,8 @@ function App() {
                         addStep={addStep}
                         removeStep={removeStep}
                         availableScripts={availableScripts}
-                        setIsNewScriptModalOpen={setIsNewScriptModalOpen}
+                        onAddNewScript={handleOpenAddScriptModal}
+                        onEditScript={handleOpenEditScriptModal}
                         uploadSOP={uploadSOP}
                         rawText={rawText} 
                         setRawText={setRawText} 
@@ -363,10 +320,8 @@ function App() {
                     />
                 )}
 
-                {/* ⬅️ New conditional rendering for the SOP Deletion tab */}
                 {activeTab === 'delete' && <SopDeletion />}
 
-                {/* ✅ Render the new History component */}
                 {activeTab === 'history' && (
                     <History
                         incidentHistory={incidentHistory}
@@ -378,14 +333,17 @@ function App() {
             </div>
 
             <Modal message={modal.message} visible={modal.visible} onClose={() => setModal({ visible: false, message: '' })} onAddSOP={modal.onAddSOP} />
+            
             <AddNewScriptModal
-                isOpen={isNewScriptModalOpen}
-                onClose={() => setIsNewScriptModalOpen(false)}
+                isOpen={isScriptModalOpen}
+                onClose={handleCloseScriptModal}
                 onScriptAdded={fetchScripts}
                 scripts={availableScripts}
+                scriptToEdit={scriptToEdit}
             />
         </div>
     );
 }
 
 export default App;
+

@@ -1,16 +1,36 @@
 // src/components/AddNewScriptModal.js
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { Plus, X, Save, ChevronDown } from 'lucide-react';
 import Modal from './Modal';
-import { saveScriptApi } from '../services/apis';
+import { saveScriptApi, updateScriptApi } from '../services/apis';
 
-const AddNewScriptModal = ({ isOpen, onClose, onScriptAdded, scripts }) => {
+const AddNewScriptModal = ({ isOpen, onClose, onScriptAdded, scripts, scriptToEdit }) => {
+    const isEditMode = Boolean(scriptToEdit);
+
     const [name, setName] = useState('');
     const [description, setDescription] = useState('');
     const [tags, setTags] = useState('');
-    const [path, setPath] = useState('');
+    const [content, setContent] = useState('');
     const [params, setParams] = useState([{ param_name: '', param_type: 'string', required: true, default_value: '' }]);
     const [modalMessage, setModalMessage] = useState({ visible: false, message: '' });
+
+    useEffect(() => {
+        if (isOpen) {
+            if (isEditMode) {
+                setName(scriptToEdit.name || '');
+                setDescription(scriptToEdit.description || '');
+                setTags(Array.isArray(scriptToEdit.tags) ? scriptToEdit.tags.join(', ') : '');
+                setContent(scriptToEdit.content || '');
+                setParams(scriptToEdit.params && scriptToEdit.params.length > 0 ? scriptToEdit.params : [{ param_name: '', param_type: 'string', required: true, default_value: '' }]);
+            } else {
+                setName('');
+                setDescription('');
+                setTags('');
+                setContent('');
+                setParams([{ param_name: '', param_type: 'string', required: true, default_value: '' }]);
+            }
+        }
+    }, [isOpen, scriptToEdit, isEditMode]);
 
     const handleParamChange = (index, field, value) => {
         const updatedParams = [...params];
@@ -28,39 +48,44 @@ const AddNewScriptModal = ({ isOpen, onClose, onScriptAdded, scripts }) => {
     };
 
     const saveScript = async () => {
-        if (!name.trim() || !path.trim()) {
-            setModalMessage({ visible: true, message: 'Script Name and Path are required.' });
+        if (!name.trim() || !content.trim()) {
+            setModalMessage({ visible: true, message: 'Script Name and Script Content are required.' });
             return;
         }
 
-        const scriptExists = scripts.some(script => script.name.toLowerCase() === name.toLowerCase());
+        const scriptExists = scripts.some(
+            script => script.name.toLowerCase() === name.toLowerCase() && script.id !== scriptToEdit?.id
+        );
+
         if (scriptExists) {
             setModalMessage({ visible: true, message: 'A script with this name already exists. Please choose a different name.' });
             return;
         }
 
-        const newScript = {
+        const scriptPayload = {
             name,
             description,
             tags: tags.split(',').map(tag => tag.trim()).filter(tag => tag),
-            path,
+            content,
             params: params.filter(param => param.param_name.trim())
         };
 
         try {
-            await saveScriptApi(newScript);
-            setModalMessage({ visible: true, message: 'Script added successfully!' });
-            setName('');
-            setDescription('');
-            setTags('');
-            setPath('');
-            setParams([{ param_name: '', param_type: 'string', required: true, default_value: '' }]);
+            if (isEditMode) {
+                await updateScriptApi({ ...scriptPayload, id: scriptToEdit.id });
+                setModalMessage({ visible: true, message: 'Script updated successfully!' });
+            } else {
+                await saveScriptApi(scriptPayload);
+                setModalMessage({ visible: true, message: 'Script added successfully!' });
+            }
+
             setTimeout(() => {
                 onClose();
                 onScriptAdded();
             }, 1500);
+
         } catch (error) {
-            console.error("Error adding new script:", error);
+            console.error(`Error ${isEditMode ? 'updating' : 'adding'} script:`, error);
             setModalMessage({ visible: true, message: error.message });
         }
     };
@@ -71,17 +96,24 @@ const AddNewScriptModal = ({ isOpen, onClose, onScriptAdded, scripts }) => {
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-gray-900 bg-opacity-50 overflow-y-auto">
             <div className="bg-white p-6 rounded-3xl shadow-2xl max-w-2xl w-full mx-4 border border-gray-200">
                 <div className="flex justify-between items-center border-b pb-4 mb-4">
-                    <h3 className="text-2xl font-bold text-blue-800">Add New Script</h3>
+                    <h3 className="text-2xl font-bold text-blue-800">{isEditMode ? 'Edit Script' : 'Add New Script'}</h3>
                     <button onClick={onClose} className="text-gray-500 hover:text-gray-800 transition duration-300">
                         <X size={24} />
                     </button>
                 </div>
 
-                <div className="space-y-4">
+                {/* --- MODIFICATION: Added height constraint and scrollbar to the form area --- */}
+                <div className="space-y-4 max-h-[70vh] overflow-y-auto pr-2">
                     <input type="text" placeholder="Script Name" value={name} onChange={e => setName(e.target.value)} className="w-full px-4 py-3 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500" />
                     <textarea placeholder="Script Description" value={description} onChange={e => setDescription(e.target.value)} className="w-full px-4 py-3 border border-gray-300 rounded-lg resize-y h-24 focus:outline-none focus:ring-2 focus:ring-blue-500" />
                     <input type="text" placeholder="Tags (comma-separated, e.g., 'server, restart, web')" value={tags} onChange={e => setTags(e.target.value)} className="w-full px-4 py-3 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500" />
-                    <input type="text" placeholder="Script Path or Command (e.g., /usr/bin/restart_server.sh)" value={path} onChange={e => setPath(e.target.value)} className="w-full px-4 py-3 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500" />
+                    
+                    <textarea 
+                        placeholder="Enter your script content here... e.g. #!/bin/bash" 
+                        value={content} 
+                        onChange={e => setContent(e.target.value)} 
+                        className="w-full px-4 py-3 font-mono text-sm border border-gray-300 rounded-lg resize-y h-48 focus:outline-none focus:ring-2 focus:ring-blue-500" 
+                    />
 
                     <h4 className="text-lg font-bold mt-8 mb-2 text-blue-700">Script Parameters:</h4>
                     {params.map((param, index) => (
@@ -97,7 +129,7 @@ const AddNewScriptModal = ({ isOpen, onClose, onScriptAdded, scripts }) => {
                                 <input type="checkbox" checked={param.required} onChange={e => handleParamChange(index, 'required', e.target.checked)} className="form-checkbox h-5 w-5 text-blue-600 rounded" />
                                 <span className="text-gray-700">Required</span>
                             </label>
-                            <input type="text" placeholder="Default Value" value={param.default_value} onChange={e => handleParamChange(index, 'default_value', e.target.value)} className="w-full sm:flex-1 px-4 py-3 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500" />
+                            <input type="text" placeholder="Default Value" value={param.default_value || ''} onChange={e => handleParamChange(index, 'default_value', e.target.value)} className="w-full sm:flex-1 px-4 py-3 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500" />
                             {params.length > 1 && (<button onClick={() => removeParam(index)} className="p-2 bg-red-100 text-red-600 rounded-full shadow-md hover:bg-red-200 transition duration-200" ><X size={20} /></button>)}
                         </div>
                     ))}
@@ -105,16 +137,18 @@ const AddNewScriptModal = ({ isOpen, onClose, onScriptAdded, scripts }) => {
                         <Plus size={20} className="mr-2" /> Add Parameter
                     </button>
                 </div>
+                {/* --- END MODIFICATION --- */}
 
                 <div className="flex justify-end mt-6 space-x-3">
                     <button onClick={saveScript} className="flex items-center px-6 py-3 bg-blue-600 text-white font-bold rounded-lg shadow-lg hover:bg-blue-700 transition duration-300" >
-                        <Save size={20} className="mr-2" /> Save Script
+                        <Save size={20} className="mr-2" /> {isEditMode ? 'Update Script' : 'Save Script'}
                     </button>
                 </div>
-                <Modal message={modalMessage.message} onClose={() => setModalMessage({ visible: false, message: '' })} />
+                <Modal message={modalMessage.message} visible={modalMessage.visible} onClose={() => setModalMessage({ visible: false, message: '' })} />
             </div>
         </div>
     );
 };
 
 export default AddNewScriptModal;
+

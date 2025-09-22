@@ -7,7 +7,7 @@ from app.services.embed_documents import delete_sop_by_id, embed_and_store_sops,
 from app.services.script_resolver import resolve_scripts, resolve_scripts_by_id
 from app.services.search_sop import search_sop_by_query
 
-from app.services.scripts import get_scripts_from_db, add_script_to_db, get_script_by_name, add_incident_history_to_db, update_incident_history
+from app.services.scripts import get_scripts_from_db, add_script_to_db, get_script_by_name, update_script_in_db, add_incident_history_to_db, update_incident_history
 from app.services.history import get_incident_history_from_db_paginated
 from app.services.incidents import get_new_unresolved_incidents, update_incident_status, fetch_incident_by_number
 from app.services.llm_client import get_llm_plan, extract_parameters_with_llm, DEFAULT_MODELS, get_structured_sop_from_llm
@@ -17,14 +17,12 @@ from typing import List, Dict, Optional, Any
 from contextlib import asynccontextmanager
 import asyncio
 
-import time
-import random
-from datetime import datetime
+# --- MODIFICATION: Import tempfile for secure script execution ---
+import tempfile
 import json
 import os
 import subprocess
 
-# Use an async context manager for startup and shutdown events
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     # This task will run in the background.
@@ -48,9 +46,10 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
+# --- Pydantic Models ---
 class Step(BaseModel):
     description: str
-    script: str
+    script: Optional[str] = None
 
 class SOP(BaseModel):
     title: str
@@ -60,18 +59,26 @@ class SOP(BaseModel):
 class IngestRequest(BaseModel):
     sops: List[SOP]
 
-# Pydantic models for the new /scripts/add endpoint
 class ScriptParam(BaseModel):
     param_name: str
     param_type: str
     required: bool
     default_value: Optional[str] = None
 
+# --- MODIFICATION: Pydantic models now use 'content' instead of 'path' ---
 class AddScriptRequest(BaseModel):
     name: str
     description: str
     tags: List[str]
-    path: str
+    content: str
+    params: List[ScriptParam]
+
+class UpdateScriptRequest(BaseModel):
+    id: int
+    name: str
+    description: str
+    tags: List[str]
+    content: str
     params: List[ScriptParam]
 
 class ExecuteScriptRequest(BaseModel):
@@ -116,14 +123,14 @@ async def monitor_new_incidents():
                         if not retrieved_sops:
                             print(f"❌ No relevant SOPs found for {incident_number}. Skipping.")
                             resolution_failed = True
-                            continue # Skip the rest of the try block and go to finally
+                            continue
 
                         llm_plan_dict = await asyncio.to_thread(get_llm_plan, rag_query, retrieved_sops, model=DEFAULT_MODELS["plan"])
                         
                         if not llm_plan_dict or not llm_plan_dict.get("steps"):
                             print(f"⚠️ LLM failed to generate a valid plan for {incident_number}. Marking as Error.")
                             resolution_failed = True
-                            continue # Skip to finally
+                            continue
                         
                         available_scripts_with_params = await asyncio.to_thread(get_scripts_from_db)
                         resolved_scripts = resolve_scripts(llm_plan_dict, available_scripts_with_params)
@@ -143,7 +150,6 @@ async def monitor_new_incidents():
                                 extracted_params = {}
 
                                 if script_details and script_details.get('params'):
-                                    print(f"🔍 Parameters required for '{script_name}'. Extracting...")
                                     extracted_params = await asyncio.to_thread(
                                         extract_parameters_with_llm, 
                                         accumulated_context, 
@@ -151,8 +157,6 @@ async def monitor_new_incidents():
                                         model=DEFAULT_MODELS["param_extraction"]
                                     )
                                     
-                                    # Parameter validation logic...
-                                    # ... (your existing code for checking missing params)
                                     missing_params = [
                                         p['param_name'] for p in script_details['params']
                                         if p['required'] and not extracted_params.get(p['param_name']) and not p.get('default_value')
@@ -168,8 +172,6 @@ async def monitor_new_incidents():
                                     resolved_script['extracted_parameters'] = extracted_params
 
                                 if not resolution_failed:
-                                    print(f"⚙️ Executing script: '{script_name}' with parameters: {extracted_params}")
-                                    
                                     execution_request = ExecuteScriptRequest(
                                         script_id=str(resolved_script.get('script_id')),
                                         script_name=script_name,
@@ -182,14 +184,12 @@ async def monitor_new_incidents():
                                     if response_body.get("status") == "error":
                                         resolved_script['status'] = "error"
                                         resolved_script['output'] = response_body.get("output", "Script failed.")
-                                        print(f"❌ Script '{script_name}' reported a failure. Halting resolution process.")
                                         resolution_failed = True
                                     else:
                                         resolved_script['status'] = "success"
                                         resolved_script['output'] = response_body.get("output", "Script executed successfully with no output.")
                                         accumulated_context[f"{script_name}_output"] = resolved_script['output']
-                                        print(f"📝 Script '{script_name}' execution output: {resolved_script['output']}")
-                                    
+                                
                                 executed_scripts.append(resolved_script)
 
                     except Exception as e:
@@ -197,19 +197,15 @@ async def monitor_new_incidents():
                         resolution_failed = True
                         
                     finally:
-                        # This block will always execute
                         if llm_plan_dict is not None:
                              await asyncio.to_thread(update_incident_history, incident_number, llm_plan_dict, executed_scripts)
                         else:
-                            # In case LLM plan extraction failed, update with an empty plan
                             await asyncio.to_thread(update_incident_history, incident_number, {"steps": []}, executed_scripts)
 
                         if resolution_failed:
                             await asyncio.to_thread(update_incident_status, incident_id, "Error")
-                            print(f"❗ Resolution process for {incident_number} failed. Incident status updated to 'Error'.")
                         else:
                             await asyncio.to_thread(update_incident_status, incident_id, "Resolved")
-                            print(f"🎉 Resolution complete and incident {incident_number} marked as resolved.")
             else:
                 print("No new incidents found.")
             
@@ -219,44 +215,115 @@ async def monitor_new_incidents():
             print(f"Error in incident monitor: {e}")
             await asyncio.sleep(60)
 
-
 @app.post("/ingest")
 def ingest_sop(request: IngestRequest):
+    print(f"📄 Executing ingest function")
     sop_dicts = [sop.model_dump() for sop in request.sops]
     embed_and_store_sops(sop_dicts)
     return {"message": "SOP(s) ingested successfully"}
 
-# Endpoint to add a new script
 @app.post("/scripts/add")
 def add_script(request: AddScriptRequest):
-    """
-    Adds a new script and its parameters to the database.
-    """
     try:
-        add_script_to_db(request.name, request.description, request.tags, request.path, request.params)
+        add_script_to_db(request.name, request.description, request.tags, request.content, request.params)
         return JSONResponse(content={"message": "Script added successfully"}, status_code=200)
     except ValueError as e:
-        # Handle cases where the script name already exists
         raise HTTPException(status_code=409, detail=str(e))
     except Exception as e:
-        # Handle other potential database errors
         raise HTTPException(status_code=500, detail=f"Failed to add script: {str(e)}")
+
+@app.put("/scripts/update")
+def update_script(request: UpdateScriptRequest):
+    try:
+        update_script_in_db(
+            script_id=request.id,
+            name=request.name,
+            description=request.description,
+            tags=request.tags,
+            content=request.content,
+            params=request.params
+        )
+        return JSONResponse(content={"message": "Script updated successfully"}, status_code=200)
+    except ValueError as e:
+        raise HTTPException(status_code=409, detail=str(e))
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Failed to update script: {str(e)}")
+
+@app.get("/scripts")
+def get_scripts():
+    scripts = get_scripts_from_db()
+    return JSONResponse(content={"scripts": scripts})
+
+# --- MODIFICATION: Added detailed logging to execute_script ---
+@app.post("/execute_script")
+def execute_script(request: ExecuteScriptRequest):
+    """
+    Executes a script by writing its content from the database to a temporary file.
+    Includes detailed logging for debugging.
+    """
+    script_details = get_script_by_name(request.script_name)
+    if not script_details:
+        raise HTTPException(status_code=404, detail=f"Script '{request.script_name}' not found.")
+
+    script_content = script_details.get('content')
+    if not script_content:
+        raise HTTPException(status_code=500, detail=f"Script content not found for '{request.script_name}'.")
+
+    temp_file_path = None
+    try:
+        with tempfile.NamedTemporaryFile(mode='w+', delete=False, suffix='.sh', dir='/tmp') as temp_file:
+            temp_file_path = temp_file.name
+            temp_file.write(script_content)
+            temp_file.flush()
+        
+        os.chmod(temp_file_path, 0o755)
+
+        command = [temp_file_path]
+        for param in script_details.get('params', []):
+            param_name = param['param_name']
+            param_value = request.parameters.get(param_name)
+            if param_value is not None:
+                command.append(str(param_value))
+
+        print(f"📄 Executing temporary script: {' '.join(command)}")
+        result = subprocess.run(command, capture_output=True, text=True, check=False)
+        
+        # --- NEW LOGGING BLOCK ---
+        if result.returncode == 0:
+            print(f"✅ Script '{request.script_name}' executed successfully. Return Code: {result.returncode}")
+            print(f"   📄 Output (stdout):\n---\n{result.stdout.strip()}\n---")
+            return JSONResponse(
+                content={"status": "success", "output": result.stdout.strip() or "Script executed successfully."},
+                status_code=200,
+            )
+        else:
+            error_output = (result.stdout.strip() + "\n" + result.stderr.strip()).strip()
+            print(f"❌ Script '{request.script_name}' execution failed. Return Code: {result.returncode}")
+            print(f"   📄 Error Output (stdout/stderr):\n---\n{error_output}\n---")
+            return JSONResponse(
+                content={"status": "error", "output": f"Script failed. Error: {error_output}"},
+                status_code=200,
+            )
+        # --- END NEW LOGGING BLOCK ---
+
+    except Exception as e:
+        # Log the exception before raising the HTTP exception
+        print(f"💥 An unhandled exception occurred during script execution: {e}")
+        raise HTTPException(status_code=500, detail=f"An error occurred during script execution: {str(e)}")
+    finally:
+        if temp_file_path and os.path.exists(temp_file_path):
+            os.unlink(temp_file_path)
+            print(f"✅ Cleaned up temporary file: {temp_file_path}")
+# --- END MODIFICATION ---
 
 
 @app.get("/search")
-async def search_sop(
-    q: str = Query(..., min_length=3),
-    model: str = Query(DEFAULT_MODELS["plan"], description="LLM model for plan generation")
-):
-    """
-    Orchestration Engine: performs RAG, generates LLM plan, maps to scripts.
-    """
+async def search_sop(q: str = Query(..., min_length=3), model: str = Query(DEFAULT_MODELS["plan"], description="LLM model for plan generation")):
     retrieved_sops = search_sop_by_query(q)
     if not retrieved_sops:
         return JSONResponse(content={"results": [], "message": "No relevant SOPs found."}, status_code=200)
 
     llm_plan_dict = get_llm_plan(q, retrieved_sops, model=model)
-
     available_scripts = get_scripts_from_db()
     resolved_scripts = resolve_scripts(llm_plan_dict, available_scripts)
 
@@ -270,14 +337,7 @@ async def search_sop(
 
 
 @app.get("/incident/{incident_number}")
-async def resolve_incident_by_number(
-    incident_number: str = Path(..., min_length=3),
-    plan_model: str = Query(DEFAULT_MODELS["plan"], description="Model for plan generation"),
-    param_model: str = Query(DEFAULT_MODELS["param_extraction"], description="Model for param extraction")
-):
-    """
-    Incident Orchestration: RAG → LLM plan → Script resolution → Parameter extraction.
-    """
+async def resolve_incident_by_number(incident_number: str = Path(..., min_length=3), plan_model: str = Query(DEFAULT_MODELS["plan"], description="Model for plan generation"), param_model: str = Query(DEFAULT_MODELS["param_extraction"], description="Model for param extraction")):
     incident_data = fetch_incident_by_number(incident_number.upper())
     if not incident_data:
         raise HTTPException(status_code=404, detail=f"Incident {incident_number} not found.")
@@ -288,7 +348,6 @@ async def resolve_incident_by_number(
         return JSONResponse(content={"results": [], "message": "No relevant SOPs found."}, status_code=200)
 
     llm_plan_dict = get_llm_plan(rag_query, retrieved_sops, model=plan_model)
-
     available_scripts_with_params = get_scripts_from_db()
     resolved_scripts = resolve_scripts(llm_plan_dict, available_scripts_with_params)
 
@@ -303,7 +362,7 @@ async def resolve_incident_by_number(
 
         final_resolved_scripts.append(resolved_script)
 
-    add_incident_history_to_db(incident_number, incident_data, llm_plan_dict, final_resolved_scripts)     
+    add_incident_history_to_db(incident_number, incident_data, llm_plan_dict, final_resolved_scripts)    
 
     return JSONResponse(content={
         "incident_number": incident_number,
@@ -315,95 +374,12 @@ async def resolve_incident_by_number(
         "param_model_used": param_model
     }, status_code=200)
 
-# Endpoint to fetch all scripts
-@app.get("/scripts")
-def get_scripts():
-    """
-    Returns a list of all available scripts from the database, including their parameters.
-    """
-    scripts = get_scripts_from_db()
-    return JSONResponse(content={"scripts": scripts})
-
-# iira/app/main.py
-
-@app.post("/execute_script")
-def execute_script(request: ExecuteScriptRequest):
-    """
-    Executes a shell script within the container with dynamic parameters.
-    """
-    try:
-        # Step 1: Fetch the script details from the database
-        script_details = get_script_by_name(request.script_name)
-        if not script_details:
-            raise HTTPException(status_code=404, detail=f"Script '{request.script_name}' not found.")
-
-        script_path = script_details.get('path')
-        if not script_path:
-            raise HTTPException(status_code=500, detail=f"Script path not found for '{request.script_name}'.")       
-
-        # Verify the script file exists in the container
-        if not os.path.exists(script_path):
-            raise HTTPException(status_code=500, detail=f"Script file not found at path: {script_path}")
-
-        # Step 2: Construct the shell command
-        # Make the script executable and then call it
-        os.chmod(script_path, 0o755) 
-        command = [script_path] # The script itself is the command
-
-        # Append parameters.
-        for param in script_details.get('params', []):
-            param_name = param['param_name']
-            param_value = request.parameters.get(param_name)
-            if param_value is not None:
-                command.append(str(param_value))
-
-        print(f"📄 Executing command: {' '.join(command)}")
-
-        # Step 3: Execute the command and capture output
-        result = subprocess.run(command, capture_output=True, text=True, check=False)
-        
-        # Step 4: Process the result
-        if result.returncode == 0:
-            return JSONResponse(
-                content={
-                    "status": "success",
-                    "output": result.stdout.strip() or "Script executed successfully with no output."
-                },
-                status_code=200,
-            )
-        else:
-            # Combine stdout and stderr for a complete error message
-            error_output = (result.stdout.strip() + "\n" + result.stderr.strip()).strip()
-            return JSONResponse(
-                content={
-                    "status": "error",
-                    "output": f"Script execution failed. Error: {error_output}"
-                },
-                status_code=200, # Still 200 OK because the API call succeeded, but the script failed
-            )
-
-    except HTTPException as http_exc:
-        raise http_exc # Re-raise known HTTP exceptions
-    except Exception as e:
-        # Catch any other unexpected errors
-        raise HTTPException(
-            status_code=500,
-            detail=f"An error occurred during script execution: {str(e)}"
-        )
-
 @app.get("/history")
-def get_incident_history(
-    page: int = Query(1, ge=1, description="Page number"),
-    limit: int = Query(10, ge=1, le=100, description="Records per page"),
-):
-    """
-    Retrieves incident history with pagination.
-    """
+def get_incident_history(page: int = Query(1, ge=1, description="Page number"), limit: int = Query(10, ge=1, le=100, description="Records per page")):
     try:
         result = get_incident_history_from_db_paginated(page, limit)
         return result
     except Exception as e:
-        print(f"Error fetching history: {e}")
         raise HTTPException(status_code=500, detail=str(e))
 
 
@@ -414,53 +390,21 @@ def get_all_sops_endpoint():
     
 @app.post("/delete_sop", summary="Delete an SOP by ID")
 def delete_sop(request: SOPDeleteByIDRequest):
-    """
-    Deletes an SOP from the Qdrant database by its unique ID.
-    """
-    print(f"Executing delete_sop for ID: {request.sop_id}")
     deleted_count = delete_sop_by_id(request.sop_id)
     if deleted_count > 0:
-        return JSONResponse(
-            content={"message": f"SOP with sop_id '{request.sop_id}' deleted successfully."},
-            status_code=200
-        )
+        return JSONResponse(content={"message": f"SOP with sop_id '{request.sop_id}' deleted successfully."}, status_code=200)
     else:
-        raise HTTPException(
-            status_code=404, 
-            detail=f"No SOP found with the sop_id '{request.sop_id}'."
-        )
+        raise HTTPException(status_code=404, detail=f"No SOP found with the sop_id '{request.sop_id}'.")
 
 @app.post("/parse_sop", summary="Parse raw SOP text into structured JSON using AI")
 def parse_sop_endpoint(request: SOPParseRequest):
-    """
-    Takes a block of raw text and uses an LLM to parse it into a structured SOP format,
-    mapping steps to available scripts.
-    """    
     document_text = request.document_text
-    
     try:
-        # Step 1: Fetch all available scripts from the database
         available_scripts = get_scripts_from_db()
-        print(f"Found {len(available_scripts)} scripts available for parsing.")
-        
-        # Step 2: Call the LLM with a detailed prompt to get the initial plan
-        # Note: The LLM output's 'steps' contain a 'tool' field, which is the script name.
         llm_plan = get_structured_sop_from_llm(document_text, available_scripts)
-        print(f"Step 2 completed.")
-        print(f"Final llm_plan: {llm_plan}")
-
-        # Step 3: Resolve the LLM's planned scripts to real, available scripts and get their IDs
         resolved_workflow = resolve_scripts_by_id(llm_plan, available_scripts)
-        print(f"Step 3 completed.")
-        # Step 4: Construct the final response
-        # Create a new dictionary to hold the final, structured SOP
-        final_sop = {
-            "title": llm_plan.get("title", ""),
-            "issue": llm_plan.get("issue", ""),
-            "steps": []
-        }
-        print(f"Step 4 completed.")
-        # Iterate through the resolved workflow to populate the steps with script names and IDs
+        
+        final_sop = { "title": llm_plan.get("title", ""), "issue": llm_plan.get("issue", ""), "steps": [] }
         for step in resolved_workflow:
             final_sop["steps"].append({
                 "description": step.get("step_description", ""),
@@ -471,8 +415,7 @@ def parse_sop_endpoint(request: SOPParseRequest):
         return JSONResponse(content=final_sop, status_code=200)
 
     except HTTPException:
-        # Re-raise HTTPExceptions as they are already properly formatted
         raise
     except Exception as e:
-        print(f"Error during SOP parsing: {e}")
         raise HTTPException(status_code=500, detail=f"An error occurred during AI parsing: {str(e)}")
+
