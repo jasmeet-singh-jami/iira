@@ -42,6 +42,10 @@ COPY --from=builder /install /usr/local
 COPY ./iira-backend/ /app/
 COPY ./scripts/ /app/scripts/
 
+# --- MODIFICATION: Copy the downloaded model files into the image ---
+COPY ./iira-backend/ml_models/ /app/ml_models/
+# --- END MODIFICATION ---
+
 # Ensure shell scripts are executable
 RUN chmod +x /app/scripts/shell/*.sh
 

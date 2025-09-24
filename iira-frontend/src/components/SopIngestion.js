@@ -110,7 +110,7 @@ const SopIngestion = ({
                                         onChange={e => handleStepChange(index, 'script_id', e.target.value)}
                                         className="block w-full px-4 py-3 border border-gray-300 rounded-lg pr-10 focus:outline-none focus:ring-2 focus:ring-blue-500 bg-white appearance-none transition duration-200"
                                     >
-                                        <option value="">Select a Script (Optional)</option>
+                                        <option value="">Select a Script </option>
                                         {availableScripts.map(script => (
                                             <option key={script.id} value={script.id}>{script.name}</option>
                                         ))}

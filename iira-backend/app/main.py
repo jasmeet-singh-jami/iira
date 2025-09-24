@@ -107,6 +107,7 @@ async def monitor_new_incidents():
 
                 for incident_number, incident_data in new_incidents.items():
                     resolution_failed = False
+                    sop_not_found = False
                     executed_scripts = []
                     llm_plan_dict = None  # Initialize outside of try block
 
@@ -123,6 +124,7 @@ async def monitor_new_incidents():
                         if not retrieved_sops:
                             print(f"❌ No relevant SOPs found for {incident_number}. Skipping.")
                             resolution_failed = True
+                            sop_not_found = True
                             continue
 
                         llm_plan_dict = await asyncio.to_thread(get_llm_plan, rag_query, retrieved_sops, model=DEFAULT_MODELS["plan"])
@@ -202,7 +204,9 @@ async def monitor_new_incidents():
                         else:
                             await asyncio.to_thread(update_incident_history, incident_number, {"steps": []}, executed_scripts)
 
-                        if resolution_failed:
+                        if sop_not_found:
+                            await asyncio.to_thread(update_incident_status, incident_id, "SOP not found")
+                        elif resolution_failed:
                             await asyncio.to_thread(update_incident_status, incident_id, "Error")
                         else:
                             await asyncio.to_thread(update_incident_status, incident_id, "Resolved")

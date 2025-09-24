@@ -15,9 +15,13 @@ qdrant_client = QdrantClient(
 )
 
 COLLECTION_NAME = "sop_documents"
-MODEL_NAME = "all-MiniLM-L6-v2"
+# --- MODIFICATION: Point to the local model path inside the Docker container ---
+MODEL_PATH = "/app/ml_models/all-MiniLM-L6-v2"
+# --- END MODIFICATION ---
 
-embedder = SentenceTransformer(MODEL_NAME)
+# --- MODIFICATION: Load the model from the local path ---
+embedder = SentenceTransformer(MODEL_PATH)
+# --- END MODIFICATION ---
 
 
 def embed_and_store_sops(sops):

@@ -5,7 +5,9 @@ from app.config import settings
 QDRANT_COLLECTION_NAME = "sop_documents"
 MIN_SCORE_THRESHOLD = 0.5
 
-MODEL_NAME = "all-MiniLM-L6-v2"
+# --- MODIFICATION: Point to the local model path inside the Docker container ---
+MODEL_PATH = "/app/ml_models/all-MiniLM-L6-v2"
+# --- END MODIFICATION ---
 COLLECTION_NAME = "sop_documents"
 
 qdrant_client = QdrantClient(
@@ -14,7 +16,9 @@ qdrant_client = QdrantClient(
     #api_key=settings.qdrant_api_key
 )
 
-embedder = SentenceTransformer(MODEL_NAME)
+# --- MODIFICATION: Load the model from the local path ---
+embedder = SentenceTransformer(MODEL_PATH)
+# --- END MODIFICATION ---
 
 
 def search_sop_by_query(query, top_k=3):
@@ -41,4 +45,3 @@ def search_sop_by_query(query, top_k=3):
             })
 
     return filtered_results
-
