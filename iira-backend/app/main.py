@@ -40,7 +40,7 @@ app = FastAPI(lifespan=lifespan)
 
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["http://localhost:3000"],
+    allow_origins=["http://localhost:3000", "http://localhost:30000"],
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
@@ -134,6 +134,10 @@ async def monitor_new_incidents():
                             resolution_failed = True
                             continue
                         
+                        # --- MODIFICATION: Update history with the generated plan ---
+                        await asyncio.to_thread(update_incident_history, incident_number, llm_plan_dict, executed_scripts)
+                        # --- END MODIFICATION ---
+
                         available_scripts_with_params = await asyncio.to_thread(get_scripts_from_db)
                         resolved_scripts = resolve_scripts(llm_plan_dict, available_scripts_with_params)
 
@@ -192,17 +196,20 @@ async def monitor_new_incidents():
                                         resolved_script['output'] = response_body.get("output", "Script executed successfully with no output.")
                                         accumulated_context[f"{script_name}_output"] = resolved_script['output']
                                 
-                                executed_scripts.append(resolved_script)
+                            executed_scripts.append(resolved_script)
+                            
+                            # --- MODIFICATION: Update history after each step ---
+                            await asyncio.to_thread(update_incident_history, incident_number, llm_plan_dict, executed_scripts)
+                            # --- END MODIFICATION ---
 
                     except Exception as e:
                         print(f"💥 Unhandled error during incident {incident_number} resolution: {e}")
                         resolution_failed = True
                         
                     finally:
-                        if llm_plan_dict is not None:
-                             await asyncio.to_thread(update_incident_history, incident_number, llm_plan_dict, executed_scripts)
-                        else:
-                            await asyncio.to_thread(update_incident_history, incident_number, {"steps": []}, executed_scripts)
+                        # --- MODIFICATION: This final update acts as a safeguard ---
+                        await asyncio.to_thread(update_incident_history, incident_number, llm_plan_dict, executed_scripts)
+                        # --- END MODIFICATION ---
 
                         if sop_not_found:
                             await asyncio.to_thread(update_incident_status, incident_id, "SOP not found")
