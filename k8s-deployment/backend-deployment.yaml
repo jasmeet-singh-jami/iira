@@ -1,0 +1,58 @@
+# 3-backend-deployment.yaml
+# Contains all Kubernetes resources for the Python backend application.
+
+# --- Backend Deployment ---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: backend-deployment
+  namespace: iira
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: backend
+  template:
+    metadata:
+      labels:
+        app: backend
+    spec:
+      # --- MODIFICATION: Add DNS configuration to ensure internet access ---
+      # This configuration helps the pod resolve external domains like huggingface.co
+      # by directly using a public DNS server, bypassing potential cluster DNS issues.
+      dnsPolicy: "None"
+      dnsConfig:
+        nameservers:
+          - 8.8.8.8
+          - 8.8.4.4
+      # --- END MODIFICATION ---
+
+      # This section tells the pod how to authenticate with your private registry.
+      imagePullSecrets:
+      - name: regcred 
+      containers:
+      - name: backend
+        image: registry.example.com:5000/iira/iira-backend:2.0
+        ports:
+        - containerPort: 8000
+        envFrom:
+        - configMapRef:
+            name: iira-backend-config # Injects all key-value pairs from the ConfigMap
+
+---
+# --- Backend Service ---
+# Exposes the backend API so the frontend can communicate with it.
+apiVersion: v1
+kind: Service
+metadata:
+  name: backend-service
+  namespace: iira
+spec:
+  selector:
+    app: backend
+  ports:
+    - protocol: TCP
+      port: 8000
+      targetPort: 8000
+  type: ClusterIP # Only needs to be accessible from the frontend inside the cluster
+

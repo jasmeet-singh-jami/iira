@@ -12,7 +12,7 @@ services:
     build:
       context: .                          
       dockerfile: iira-backend/Dockerfile 
-    image: iira/iira-backend:1.0
+    image: iira/iira-backend:2.0
     container_name: python-backend
     ports:
       - "8000:8000"

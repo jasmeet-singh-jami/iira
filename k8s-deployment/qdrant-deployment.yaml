@@ -1,0 +1,61 @@
+# 2-qdrant-deployment.yaml
+# Contains all Kubernetes resources for the Qdrant vector database.
+
+# --- Qdrant Persistent Volume Claim ---
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: qdrant-pvc
+  namespace: iira
+spec:
+  accessModes:
+    - ReadWriteOnce
+  resources:
+    requests:
+      storage: 5Gi # Adjust storage size as needed
+
+---
+# --- Qdrant Deployment ---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: qdrant-deployment
+  namespace: iira
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: qdrant
+  template:
+    metadata:
+      labels:
+        app: qdrant
+    spec:
+      containers:
+      - name: qdrant
+        image: qdrant/qdrant:v1.15.0 # Uses the image you loaded
+        ports:
+        - containerPort: 6333
+        volumeMounts:
+        - name: qdrant-storage
+          mountPath: /qdrant/storage
+      volumes:
+      - name: qdrant-storage
+        persistentVolumeClaim:
+          claimName: qdrant-pvc
+
+---
+# --- Qdrant Service ---
+apiVersion: v1
+kind: Service
+metadata:
+  name: qdrant-service # This name is used in the QDRANT_HOST
+  namespace: iira
+spec:
+  selector:
+    app: qdrant
+  ports:
+    - protocol: TCP
+      port: 6333
+      targetPort: 6333
+  type: ClusterIP

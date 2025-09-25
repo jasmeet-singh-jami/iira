@@ -1,0 +1,77 @@
+
+# 1-postgres-deployment.yaml
+# Contains all Kubernetes resources for the PostgreSQL database.
+
+# --- Persistent Volume Claim (PVC) ---
+# This requests storage from the cluster for the database to use.
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: postgres-pvc
+  namespace: iira
+spec:
+  accessModes:
+    - ReadWriteOnce # This volume can be mounted by a single node
+  resources:
+    requests:
+      storage: 1Gi # Request 1 Gigabyte of storage
+
+---
+# --- PostgreSQL Deployment ---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: postgres-deployment
+  namespace: iira
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: postgres
+  template:
+    metadata:
+      labels:
+        app: postgres
+    spec:
+      containers:
+      - name: postgres
+        image: registry.example.com/postgres:15
+        ports:
+        - containerPort: 5432
+        env:
+        - name: POSTGRES_USER
+          value: "postgres"
+        - name: POSTGRES_PASSWORD
+          value: "postgres"
+        - name: POSTGRES_DB
+          value: "iira"
+        # This tells PostgreSQL to create and use the 'data' subdirectory inside the volume mount.
+        # This avoids the 'lost+found' directory issue.
+        - name: PGDATA
+          value: /var/lib/postgresql/data
+        volumeMounts:
+        - name: postgres-storage
+          # Mount the volume one level higher ---
+          mountPath: /var/lib/postgresql
+      volumes:
+      - name: postgres-storage
+        persistentVolumeClaim:
+          claimName: postgres-pvc
+
+---
+# --- PostgreSQL Service ---
+# Exposes the database so the backend can connect to it.
+apiVersion: v1
+kind: Service
+metadata:
+  name: postgres
+  namespace: iira
+spec:
+  selector:
+    app: postgres
+  ports:
+    - protocol: TCP
+      port: 5432
+      targetPort: 5432
+  type: ClusterIP # Only needs to be accessible from the backend inside the cluster
+
