@@ -31,7 +31,9 @@ function App() {
     const [isScriptModalOpen, setIsScriptModalOpen] = useState(false);
     const [scriptToEdit, setScriptToEdit] = useState(null);
     
-    const [activeTab, setActiveTab] = useState('search');
+    // --- MODIFICATION: Set the default tab to 'ingest' (SOP Onboarding) ---
+    const [activeTab, setActiveTab] = useState('ingest');
+    // --- END MODIFICATION ---
 
     // State for history tab (new)
     const [incidentHistory, setIncidentHistory] = useState([]);
@@ -97,25 +99,19 @@ function App() {
         }
     };
 
-    // --- MODIFICATION: Update both script_id and script name on change ---
     const handleStepChange = (index, field, value) => {
         const updatedSteps = [...steps];
         
-        // If the user is changing the script selection from the dropdown
         if (field === 'script_id') {
             const selectedScript = availableScripts.find(s => s.id === value);
-            
-            // Update both the script_id for the UI and the script name for the payload
             updatedSteps[index]['script_id'] = value;
             updatedSteps[index]['script'] = selectedScript ? selectedScript.name : null; 
         } else {
-            // For other fields like 'description', update directly
             updatedSteps[index][field] = value;
         }
         
         setSteps(updatedSteps);
     };
-    // --- END MODIFICATION ---
 
     const addStep = () => {
         setSteps([...steps, { description: '', script: '' }]);
@@ -126,14 +122,12 @@ function App() {
         setSteps(updatedSteps);
     };
 
-    // --- MODIFICATION: Add validation and create a clean payload ---
     const uploadSOP = async () => {
         if (!title.trim() || !issue.trim()) {
             setModal({ visible: true, message: 'Title and Issue cannot be empty.' });
             return;
         }
 
-        // 1. Validation: Check if any step was left unresolved after AI parsing.
         const unresolvedStep = steps.find(step => step.script_id === 'Not Found');
         if (unresolvedStep) {
             setModal({ 
@@ -143,7 +137,6 @@ function App() {
             return;
         }
 
-        // 2. A step is valid if it has a description. It doesn't need a script (manual step).
         const validSteps = steps.filter(step => step.description.trim());
 
         if (validSteps.length === 0) {
@@ -151,10 +144,9 @@ function App() {
             return;
         }
 
-        // 3. Create the final payload, ensuring we only send the fields the backend expects.
         const payloadSteps = validSteps.map(({ description, script }) => ({
             description,
-            script: script || null // Ensure script is null if it's empty/undefined
+            script: script || null
         }));
 
         try {
@@ -167,7 +159,6 @@ function App() {
             setModal({ visible: true, message: error.message });
         }
     };
-    // --- END MODIFICATION ---
 
     const switchToIngestTab = () => {
         setActiveTab('ingest');
@@ -271,20 +262,23 @@ function App() {
         <div className="bg-gray-50 min-h-screen p-4 sm:p-8 font-sans antialiased text-gray-800">
             <div className="container mx-auto max-w-4xl bg-white p-6 sm:p-8 rounded-3xl shadow-xl border border-gray-200">
                 <div className="flex justify-center mb-8">
-                    <button onClick={() => setActiveTab('search')} className={`py-3 px-8 text-xl font-bold rounded-l-full transition duration-300 focus:outline-none ${activeTab === 'search' ? 'bg-blue-600 text-white shadow-lg' : 'bg-gray-200 text-gray-700 hover:bg-gray-300'}`}>
-                        Resolve Incident
-                    </button>
-                    <button onClick={() => setActiveTab('ingest')} className={`py-3 px-8 text-xl font-bold transition duration-300 focus:outline-none ${activeTab === 'ingest' ? 'bg-blue-600 text-white shadow-lg' : 'bg-gray-200 text-gray-700 hover:bg-gray-300'}`}>
-                        SOP Ingestion
+                    {/* --- MODIFICATION: Reordered buttons and updated text/styling --- */}
+                    <button onClick={() => setActiveTab('ingest')} className={`py-3 px-8 text-xl font-bold rounded-l-full transition duration-300 focus:outline-none ${activeTab === 'ingest' ? 'bg-blue-600 text-white shadow-lg' : 'bg-gray-200 text-gray-700 hover:bg-gray-300'}`}>
+                        SOP Onboarding
                     </button>
                     <button onClick={() => setActiveTab('delete')} className={`py-3 px-8 text-xl font-bold transition duration-300 focus:outline-none ${activeTab === 'delete' ? 'bg-blue-600 text-white shadow-lg' : 'bg-gray-200 text-gray-700 hover:bg-gray-300'}`}>
                         SOP Deletion
                     </button>
+                    <button onClick={() => setActiveTab('search')} className={`py-3 px-8 text-xl font-bold transition duration-300 focus:outline-none ${activeTab === 'search' ? 'bg-blue-600 text-white shadow-lg' : 'bg-gray-200 text-gray-700 hover:bg-gray-300'}`}>
+                        Test Bed
+                    </button>
                     <button onClick={() => setActiveTab('history')} className={`py-3 px-8 text-xl font-bold rounded-r-full transition duration-300 focus:outline-none ${activeTab === 'history' ? 'bg-blue-600 text-white shadow-lg' : 'bg-gray-200 text-gray-700 hover:bg-gray-300'}`}>
                         History
                     </button>
+                    {/* --- END MODIFICATION --- */}
                 </div>
 
+                {/* --- MODIFICATION: Reordered content blocks to match buttons for readability --- */}
                 {activeTab === 'ingest' && (
                     <SopIngestion
                         title={title}
@@ -307,6 +301,8 @@ function App() {
                     />
                 )}
 
+                {activeTab === 'delete' && <SopDeletion />}
+
                 {activeTab === 'search' && (
                     <IncidentResolution
                         incidentNumber={incidentNumber}
@@ -320,8 +316,6 @@ function App() {
                     />
                 )}
 
-                {activeTab === 'delete' && <SopDeletion />}
-
                 {activeTab === 'history' && (
                     <History
                         incidentHistory={incidentHistory}
@@ -330,6 +324,7 @@ function App() {
                         setModal={setHistoryModal}
                     />
                 )}
+                {/* --- END MODIFICATION --- */}
             </div>
 
             <Modal message={modal.message} visible={modal.visible} onClose={() => setModal({ visible: false, message: '' })} onAddSOP={modal.onAddSOP} />
