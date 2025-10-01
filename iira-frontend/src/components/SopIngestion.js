@@ -1,19 +1,23 @@
 import React, { useState } from 'react';
 import { Plus, X, ChevronDown, Wand2, RefreshCcw, Loader2, Pencil } from 'lucide-react';
-
+// --- NEW: Import the SearchableDropdown component ---
+import SearchableDropdown from './SearchableDropdown';
+// --- END NEW ---
 
 const SopIngestion = ({
     title,
     setTitle,
     issue,
     setIssue,
+    tags,
+    setTags,
     steps,
     handleStepChange,
     addStep,
     removeStep,
     availableScripts,
-    onAddNewScript, // Changed from setIsNewScriptModalOpen
-    onEditScript,   // New prop to handle editing
+    onAddNewScript,
+    onEditScript,
     uploadSOP,
     rawText,
     setRawText,
@@ -21,13 +25,11 @@ const SopIngestion = ({
     loading,
     resetSOPSteps
 }) => {
-    // State to track which script is selected in the new "edit" dropdown
     const [scriptIdToEdit, setScriptIdToEdit] = useState('');
 
-    // Handler to find the selected script object and pass it to the parent
     const handleEditScript = () => {
         if (!scriptIdToEdit) return;
-        const script = availableScripts.find(s => s.id === scriptIdToEdit);
+        const script = availableScripts.find(s => String(s.id) === String(scriptIdToEdit));
         if (script) {
             onEditScript(script);
         }
@@ -36,10 +38,9 @@ const SopIngestion = ({
     return (
         <div>
             <h2 className="text-3xl sm:text-4xl font-extrabold text-blue-800 mb-6 border-b-2 pb-2 border-blue-100">
-                SOP Ingestion
+                SOP Onboarding
             </h2>
 
-            {/* AI Parsing Section... no changes needed here */}
             <div className="bg-blue-50 p-6 rounded-xl border border-blue-200 mb-6 shadow-inner">
                 <h3 className="text-xl font-bold text-blue-700 mb-3 flex items-center">
                     <Wand2 className="h-6 w-6 mr-2" /> AI-Powered SOP Parsing
@@ -88,6 +89,13 @@ const SopIngestion = ({
                     onChange={e => setIssue(e.target.value)}
                     className="w-full px-4 py-3 border border-gray-300 rounded-lg resize-y h-24 focus:outline-none focus:ring-2 focus:ring-blue-500 transition duration-200"
                 />
+                <input
+                    type="text"
+                    placeholder="Tags (comma-separated, e.g., billing-service, app-server-01, database)"
+                    value={tags}
+                    onChange={e => setTags(e.target.value)}
+                    className="w-full px-4 py-3 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 transition duration-200"
+                />
             </div>
 
             <div className="space-y-6 mt-6">
@@ -105,19 +113,12 @@ const SopIngestion = ({
                             />
                             <div className="relative flex items-center space-x-2">
                                 <div className="relative flex-grow">
-                                    <select
+                                    <SearchableDropdown
+                                        options={availableScripts}
                                         value={step.script_id || ''}
-                                        onChange={e => handleStepChange(index, 'script_id', e.target.value)}
-                                        className="block w-full px-4 py-3 border border-gray-300 rounded-lg pr-10 focus:outline-none focus:ring-2 focus:ring-blue-500 bg-white appearance-none transition duration-200"
-                                    >
-                                        <option value="">Select a Script </option>
-                                        {availableScripts.map(script => (
-                                            <option key={script.id} value={script.id}>{script.name}</option>
-                                        ))}
-                                    </select>
-                                    <div className="pointer-events-none absolute inset-y-0 right-0 flex items-center px-2 text-gray-700">
-                                        <ChevronDown className="h-4 w-4" />
-                                    </div>
+                                        onChange={(value) => handleStepChange(index, 'script_id', value)}
+                                        placeholder="Select a Script (Optional)"
+                                    />
                                 </div>
                                 <button onClick={onAddNewScript} className="p-2 bg-blue-100 text-blue-600 rounded-full shadow-md hover:bg-blue-200 transition duration-200 flex-shrink-0" title="Add New Script">
                                     <Plus size={20} />
@@ -127,25 +128,18 @@ const SopIngestion = ({
                         {steps.length > 1 && (<button onClick={() => removeStep(index)} className="p-2 bg-red-100 text-red-600 rounded-full shadow-md hover:bg-red-200 transition duration-200" ><X size={20} /></button>)}
                     </div>
                 ))}
-                {/* --- NEW SECTION for adding and editing scripts --- */}
                 <div className="flex items-center space-x-4 mt-4 pt-4 border-t">
                     <button onClick={addStep} className="flex items-center px-4 py-2 bg-green-500 text-white font-semibold rounded-lg shadow-md hover:bg-green-600 transition duration-300" >
                         <Plus size={20} className="mr-2" /> Add Step
                     </button>
                     
-                    <div className="flex items-center space-x-2 border-l pl-4">
-                        <select
+                    <div className="flex items-center space-x-2 border-l pl-4 w-full md:w-1/2">
+                        <SearchableDropdown
+                            options={availableScripts}
                             value={scriptIdToEdit}
-                            onChange={(e) => setScriptIdToEdit(e.target.value)}
-                            className="block w-full px-4 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 bg-white transition duration-200"
-                        >
-                            <option value="">Select script to edit...</option>
-                            {availableScripts.map((script) => (
-                                <option key={script.id} value={script.id}>
-                                    {script.name}
-                                </option>
-                            ))}
-                        </select>
+                            onChange={setScriptIdToEdit}
+                            placeholder="Select script to edit..."
+                        />
                         <button
                             onClick={handleEditScript}
                             disabled={!scriptIdToEdit}
@@ -155,7 +149,6 @@ const SopIngestion = ({
                         </button>
                     </div>
                 </div>
-                {/* --- END NEW SECTION --- */}
             </div>
             <button onClick={uploadSOP} className="w-full sm:w-auto mt-6 px-8 py-3 bg-blue-600 text-white font-bold rounded-lg shadow-lg hover:bg-blue-700 transition duration-300" >
                 Upload SOP
@@ -165,3 +158,4 @@ const SopIngestion = ({
 };
 
 export default SopIngestion;
+
