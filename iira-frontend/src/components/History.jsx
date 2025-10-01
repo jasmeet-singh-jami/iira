@@ -1,5 +1,7 @@
 import React, { useState, useEffect } from 'react';
-import { ChevronDown, ChevronUp, Clock } from 'lucide-react';
+// --- MODIFICATION: Import the RefreshCw icon ---
+import { ChevronDown, ChevronUp, Clock, RefreshCw } from 'lucide-react';
+// --- END MODIFICATION ---
 import { fetchHistoryApi } from '../services/apis';
 import Modal from './Modal';
 
@@ -54,6 +56,7 @@ const History = () => {
   };
 
   const formatDate = (dateString) => {
+    if (!dateString) return 'In Progress';
     const date = new Date(dateString);
     return date.toLocaleDateString() + ' ' + date.toLocaleTimeString();
   };
@@ -67,7 +70,9 @@ const History = () => {
       case 'Resolved':
         return 'bg-green-200 text-green-800';
       case 'Error':
-        return 'bg-red-200 text-red-800';  
+        return 'bg-red-200 text-red-800';
+      case 'SOP not found':
+        return 'bg-purple-200 text-purple-800';
       default:
         return 'bg-gray-200 text-gray-800';
     }
@@ -86,7 +91,9 @@ const History = () => {
     }
   };
 
-  if (loading) {
+  // --- MODIFICATION: Only show the full-page loader on the very first load ---
+  if (loading && incidentHistory.length === 0) {
+  // --- END MODIFICATION ---
     return (
       <div className="flex justify-center items-center h-40">
         <div className="animate-spin rounded-full h-16 w-16 border-t-2 border-b-2 border-blue-500"></div>
@@ -122,7 +129,7 @@ const History = () => {
                     </span>
                   </h3>
                   <p className="text-sm text-gray-500 mt-1">
-                    Resolved on: {formatDate(incident.resolved_at)}
+                    Last Updated: {formatDate(incident.resolved_at)}
                   </p>
                 </div>
                 <button className="text-blue-600 hover:text-blue-800 transition duration-200">
@@ -133,28 +140,30 @@ const History = () => {
                 <div className="mt-4 pt-4 border-t border-gray-200 space-y-4">
                   <div>
                     <h4 className="text-lg font-semibold text-gray-700">Initial Incident Details:</h4>
-                    <p className="text-gray-600 bg-gray-50 p-3 rounded-lg mt-2 font-mono text-sm">
+                    <div className="text-gray-600 bg-gray-50 p-3 rounded-lg mt-2 font-mono text-sm">
                       <pre className="whitespace-pre-wrap">{JSON.stringify(incident.incident_data, null, 2)}</pre>
-                    </p>
+                    </div>
                   </div>
                   <div>
                     <h4 className="text-lg font-semibold text-gray-700">LLM Plan:</h4>
-                    <p className="text-gray-600 bg-gray-50 p-3 rounded-lg mt-2 font-mono text-sm">
+                    <div className="text-gray-600 bg-gray-50 p-3 rounded-lg mt-2 font-mono text-sm">
                       <pre className="whitespace-pre-wrap">{JSON.stringify(incident.llm_plan, null, 2)}</pre>
-                    </p>
+                    </div>
                   </div>
                   <div>
                     <h4 className="text-lg font-semibold text-gray-700">Resolved Scripts:</h4>
                     {incident.resolved_scripts && incident.resolved_scripts.length > 0 ? (
                       incident.resolved_scripts.map((script, index) => (
                         <div key={index} className="bg-gray-50 p-3 rounded-lg mt-2 space-y-1">
-                          <p className="font-semibold text-gray-700">{index + 1}. {script.script_name}</p>
-                          <p className="text-sm text-gray-600">
-                            <span className="font-medium">Parameters:</span>
-                            <span className="font-mono ml-2">{JSON.stringify(script.extracted_parameters)}</span>
-                          </p>
-                          <div className="bg-gray-200 rounded-lg p-2 mt-2 text-xs font-mono whitespace-pre-wrap max-h-32 overflow-y-auto">
-                            {script.output}
+                          <p className="font-semibold text-gray-700">{index + 1}. {script.script_name || script.step_description}</p>
+                          {script.script_name && (
+                            <p className="text-sm text-gray-600">
+                                <span className="font-medium">Parameters:</span>
+                                <span className="font-mono ml-2">{JSON.stringify(script.extracted_parameters)}</span>
+                            </p>
+                          )}
+                          <div className={`rounded-lg p-2 mt-2 text-xs font-mono whitespace-pre-wrap max-h-32 overflow-y-auto ${script.status === 'success' ? 'bg-green-100' : script.status === 'error' ? 'bg-red-100' : 'bg-gray-200'}`}>
+                            {script.output || 'No output.'}
                           </div>
                         </div>
                       ))
@@ -170,7 +179,7 @@ const History = () => {
           <div className="flex justify-between items-center mt-6">
             <button
               onClick={handlePrev}
-              disabled={page === 1}
+              disabled={page === 1 || loading}
               className="px-4 py-2 bg-gray-200 rounded-lg disabled:opacity-50"
             >
               Previous
@@ -180,7 +189,7 @@ const History = () => {
             </span>
             <button
               onClick={handleNext}
-              disabled={page === totalPages}
+              disabled={page === totalPages || loading}
               className="px-4 py-2 bg-gray-200 rounded-lg disabled:opacity-50"
             >
               Next
@@ -188,6 +197,18 @@ const History = () => {
           </div>
         </>
       )}
+
+      {/* --- NEW: Floating Refresh Button --- */}
+      <button
+        onClick={fetchHistory}
+        disabled={loading}
+        className="fixed bottom-10 right-10 bg-blue-600 text-white p-4 rounded-full shadow-lg hover:bg-blue-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-blue-500 transition-transform duration-200 hover:scale-110 disabled:bg-blue-400 disabled:cursor-not-allowed"
+        title="Refresh History"
+      >
+        <RefreshCw size={24} className={loading ? 'animate-spin' : ''} />
+      </button>
+      {/* --- END NEW --- */}
+      
       <Modal message={modal.message} visible={modal.visible} onClose={() => setModal({ visible: false, message: '' })} />
     </div>
   );
