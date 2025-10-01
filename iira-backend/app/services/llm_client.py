@@ -227,3 +227,21 @@ def extract_json(response: str) -> str:
     if match:
         return match.group(0)
     raise ValueError("No JSON object found in response.")
+
+def generate_hypothetical_sop(query: str, model: str = DEFAULT_MODELS["sop_parser"]) -> str:
+    """
+    Uses an LLM to generate a hypothetical SOP document based on an incident query.
+    This expanded text is then used to create a more effective search vector.
+    """
+    prompt = f"""
+    You are an expert Site Reliability Engineer. Based on the following incident description, write a concise, one-paragraph summary of an ideal Standard Operating Procedure (SOP) that would help in debugging and finally to resolve this issue.
+    Focus on the general problem type and the key steps required for debugging as well as resolution. Do not invent specific script names or parameters.
+
+    Incident Description: "{query}"
+
+    Hypothetical SOP Summary:
+    """
+    print(f"📝 Generating hypothetical document for query: \"{query}\"")
+    hypothetical_doc = call_ollama(prompt, model=model)
+    print(f"✅ Generated Document:\n---\n{hypothetical_doc}\n---")
+    return hypothetical_doc

@@ -1,0 +1,15 @@
+Title: Comprehensive Application Health Check and Triage
+
+Issue: An application, such as a billing-service, email-service or payment-gateway, is reported to be unstable, inaccessible, or returning intermittent errors. The goal is to perform a first-level health check to determine the service's operational status, identify the specific software version that is currently deployed, retrieve the relevant logs for that version, perform an initial analysis for critical errors, and escalate to the appropriate support team if necessary.
+
+Steps:
+
+Step 1: Check the live status of the application. This step validates if the service process is running on the host server. The application's name should be provided as a parameter. The output should confirm if the service is online and provide its version. -> Get Application Status
+
+Step 2: From the status output of the previous step, extract just the version number. The full status line (e.g., "Status: Online, Version: 1.2.3") will be the input for this step. This ensures that we are targeting the logs for the exact version that is currently experiencing issues. -> Parse Application Version
+
+Step 3: Using the application's name and the extracted version number from the previous step, fetch the relevant application logs. This script will access the log directory on the server and pull the log files that correspond to the specified application and version. -> Get Application Logs
+
+Step 4: Review the retrieved logs for critical error messages. This step scans the log content from the previous step for keywords like "ERROR", "FATAL", "Exception", or "Traceback". The output should be a summary of findings. -> Review Logs for Errors
+
+Step 5: Escalate to the Application Support Team if critical errors were found. This final step notifies the appropriate team with the incident number and a summary of the log analysis, ensuring a timely handoff for further investigation. -> Escalate to Support Team
