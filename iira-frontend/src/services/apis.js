@@ -151,4 +151,13 @@ export const updateScriptApi = async (scriptData) => {
     }
 };
 
-
+export const deleteScriptApi = async (scriptId) => {
+    try {
+        const response = await axios.delete(`${API_BASE}/api/scripts/delete/${scriptId}`);
+        return response.data;
+    } catch (error) {
+        console.error("API Error: Error deleting script:", error);
+        const errorMessage = error.response?.data?.detail || 'Failed to delete script. Please check the API server.';
+        throw new Error(errorMessage);
+    }
+};

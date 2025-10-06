@@ -68,9 +68,65 @@ def get_scripts_from_db() -> List[Dict]:
     finally:
         if conn is not None:
             conn.close()
-            print("Database connection closed.")
+            # Removed the print statement for cleaner logs in production
     
     return list(scripts_with_params.values())
+
+# --- NEW: Function to get a single script by its primary key ID ---
+def get_script_by_id(script_id: int) -> Optional[Dict]:
+    """
+    Fetches a single script and its parameters by its integer primary key.
+    This is used after a vector search returns a matching script ID.
+    """
+    conn = None
+    script_data = None
+    try:
+        conn = psycopg2.connect(DATABASE_URL)
+        cur = conn.cursor()
+
+        cur.execute("""
+            SELECT
+                s.id, s.name, s.description, s.tags, s.content,
+                sp.param_name, sp.param_type, sp.required, sp.default_value
+            FROM scripts s
+            LEFT JOIN script_params sp ON s.id = sp.script_id
+            WHERE s.id = %s;
+        """, (script_id,))
+        
+        rows = cur.fetchall()
+
+        if not rows:
+            return None
+
+        script_id_db, name, description, tags, content, _, _, _, _ = rows[0]
+        script_data = {
+            "id": str(script_id_db),
+            "name": name,
+            "description": description,
+            "tags": tags,
+            "content": content,
+            "params": []
+        }
+
+        for row in rows:
+            _, _, _, _, _, param_name, param_type, required, default_value = row
+            if param_name:
+                script_data['params'].append({
+                    "param_name": param_name,
+                    "param_type": param_type,
+                    "required": required,
+                    "default_value": default_value
+                })
+
+        cur.close()
+    except (Exception, psycopg2.DatabaseError) as error:
+        print(f"Database error while getting script by ID: {error}")
+    finally:
+        if conn is not None:
+            conn.close()
+    
+    return script_data
+# --- END NEW ---
 
 def get_script_by_name(name: str) -> Optional[Dict]:
     """
@@ -262,3 +318,33 @@ def update_incident_history(incident_number: str, llm_plan: Dict, resolved_scrip
     finally:
         if conn is not None: conn.close()
 
+def delete_script_from_db(script_id: int) -> int:
+    """
+    Deletes a script and its associated parameters from the database.
+    Returns the number of deleted script rows (0 or 1).
+    """
+    conn = None
+    cur = None
+    try:
+        conn = psycopg2.connect(DATABASE_URL)
+        cur = conn.cursor()
+        
+        # The DELETE will cascade to the script_params table due to the foreign key constraint.
+        cur.execute("DELETE FROM scripts WHERE id = %s;", (script_id,))
+        
+        deleted_rows = cur.rowcount
+        conn.commit()
+        
+        print(f"✅ Successfully deleted script with ID: {script_id}. Rows affected: {deleted_rows}")
+        return deleted_rows
+
+    except (Exception, psycopg2.DatabaseError) as error:
+        if conn:
+            conn.rollback()
+        print(f"❌ Database error while deleting script: {error}")
+        raise Exception(f"Failed to delete script: {error}") from error
+    finally:
+        if cur:
+            cur.close()
+        if conn:
+            conn.close()

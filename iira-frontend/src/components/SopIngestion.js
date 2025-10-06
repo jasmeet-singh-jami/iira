@@ -1,8 +1,8 @@
 import React, { useState } from 'react';
-import { Plus, X, ChevronDown, Wand2, RefreshCcw, Loader2, Pencil } from 'lucide-react';
-// --- NEW: Import the SearchableDropdown component ---
+// --- MODIFICATION: Import the Trash2 icon ---
+import { Plus, X, ChevronDown, Wand2, RefreshCcw, Loader2, Pencil, Trash2 } from 'lucide-react';
+// --- END MODIFICATION ---
 import SearchableDropdown from './SearchableDropdown';
-// --- END NEW ---
 
 const SopIngestion = ({
     title,
@@ -18,6 +18,9 @@ const SopIngestion = ({
     availableScripts,
     onAddNewScript,
     onEditScript,
+    // --- MODIFICATION: Add onDeleteScript to the component's props ---
+    onDeleteScript,
+    // --- END MODIFICATION ---
     uploadSOP,
     rawText,
     setRawText,
@@ -32,6 +35,14 @@ const SopIngestion = ({
         const script = availableScripts.find(s => String(s.id) === String(scriptIdToEdit));
         if (script) {
             onEditScript(script);
+        }
+    };
+    
+    const handleDeleteScript = () => {
+        if (!scriptIdToEdit) return;
+        const script = availableScripts.find(s => String(s.id) === String(scriptIdToEdit));
+        if (script) {
+            onDeleteScript(script);
         }
     };
 
@@ -133,19 +144,26 @@ const SopIngestion = ({
                         <Plus size={20} className="mr-2" /> Add Step
                     </button>
                     
-                    <div className="flex items-center space-x-2 border-l pl-4 w-full md:w-1/2">
+                    <div className="flex items-center space-x-2 border-l pl-4 w-full md:w-2/3">
                         <SearchableDropdown
                             options={availableScripts}
                             value={scriptIdToEdit}
                             onChange={setScriptIdToEdit}
-                            placeholder="Select script to edit..."
+                            placeholder="Select script to manage..."
                         />
                         <button
                             onClick={handleEditScript}
                             disabled={!scriptIdToEdit}
                             className="flex items-center px-4 py-2 bg-yellow-500 text-white font-semibold rounded-lg shadow-md hover:bg-yellow-600 transition duration-300 disabled:bg-gray-300 disabled:cursor-not-allowed whitespace-nowrap"
                         >
-                            <Pencil size={18} className="mr-2" /> Edit Script
+                            <Pencil size={18} className="mr-2" /> Edit
+                        </button>
+                        <button
+                            onClick={handleDeleteScript}
+                            disabled={!scriptIdToEdit}
+                            className="flex items-center px-4 py-2 bg-red-600 text-white font-semibold rounded-lg shadow-md hover:bg-red-700 transition duration-300 disabled:bg-gray-300 disabled:cursor-not-allowed whitespace-nowrap"
+                        >
+                            <Trash2 size={18} className="mr-2" /> Delete
                         </button>
                     </div>
                 </div>

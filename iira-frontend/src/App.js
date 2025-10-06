@@ -6,7 +6,9 @@ import SopIngestion from './components/SopIngestion';
 import IncidentResolution from './components/IncidentResolution';
 import History from './components/History';
 import SopDeletion from './components/SopDeletion';
-import { fetchScriptsApi, uploadSOPApi, resolveIncidentApi, executeScriptApi, parseSOPApi } from './services/apis';
+// --- MODIFICATION: Import ConfirmationModal ---
+import ConfirmationModal from './components/ConfirmationModal'; 
+import { fetchScriptsApi, uploadSOPApi, resolveIncidentApi, executeScriptApi, parseSOPApi, deleteScriptApi } from './services/apis';
 
 function App() {
     // State for the SOP ingestion form
@@ -31,14 +33,21 @@ function App() {
     const [isScriptModalOpen, setIsScriptModalOpen] = useState(false);
     const [scriptToEdit, setScriptToEdit] = useState(null);
     
-    // --- MODIFICATION: Set the default tab to 'ingest' (SOP Onboarding) ---
     const [activeTab, setActiveTab] = useState('ingest');
-    // --- END MODIFICATION ---
 
     // State for history tab (new)
     const [incidentHistory, setIncidentHistory] = useState([]);
     const [loadingHistory, setLoadingHistory] = useState(false);
     const [historyModal, setHistoryModal] = useState({ visible: false, message: '' });
+
+    // --- NEW: Add state for the confirmation modal ---
+    const [confirmationModal, setConfirmationModal] = useState({
+        isOpen: false,
+        title: '',
+        message: '',
+        onConfirm: () => {},
+    });
+    // --- END NEW ---
 
     const fetchScripts = async () => {
         try {
@@ -69,6 +78,32 @@ function App() {
         setTimeout(() => {
             setScriptToEdit(null);
         }, 300);
+    };
+
+    const handleDeleteScript = (script) => {
+        if (!script) return;
+        setConfirmationModal({
+            isOpen: true,
+            title: 'Delete Script',
+            message: `Are you sure you want to permanently delete the script "${script.name}"? This action cannot be undone.`,
+            onConfirm: () => confirmDeleteScript(script.id),
+        });
+    };
+
+    const confirmDeleteScript = async (scriptId) => {
+        try {
+            const response = await deleteScriptApi(scriptId);
+            setModal({ visible: true, message: response.message });
+            fetchScripts(); // Refresh the script list
+        } catch (error) {
+            setModal({ visible: true, message: error.message });
+        } finally {
+            closeConfirmationModal();
+        }
+    };
+
+    const closeConfirmationModal = () => {
+        setConfirmationModal({ isOpen: false, title: '', message: '', onConfirm: () => {} });
     };
 
     const resetSOPSteps = () => {
@@ -262,7 +297,6 @@ function App() {
         <div className="bg-gray-50 min-h-screen p-4 sm:p-8 font-sans antialiased text-gray-800">
             <div className="container mx-auto max-w-4xl bg-white p-6 sm:p-8 rounded-3xl shadow-xl border border-gray-200">
                 <div className="flex justify-center mb-8">
-                    {/* --- MODIFICATION: Reordered buttons and updated text/styling --- */}
                     <button onClick={() => setActiveTab('ingest')} className={`py-3 px-8 text-xl font-bold rounded-l-full transition duration-300 focus:outline-none ${activeTab === 'ingest' ? 'bg-blue-600 text-white shadow-lg' : 'bg-gray-200 text-gray-700 hover:bg-gray-300'}`}>
                         SOP Onboarding
                     </button>
@@ -275,10 +309,8 @@ function App() {
                     <button onClick={() => setActiveTab('history')} className={`py-3 px-8 text-xl font-bold rounded-r-full transition duration-300 focus:outline-none ${activeTab === 'history' ? 'bg-blue-600 text-white shadow-lg' : 'bg-gray-200 text-gray-700 hover:bg-gray-300'}`}>
                         History
                     </button>
-                    {/* --- END MODIFICATION --- */}
                 </div>
 
-                {/* --- MODIFICATION: Reordered content blocks to match buttons for readability --- */}
                 {activeTab === 'ingest' && (
                     <SopIngestion
                         title={title}
@@ -292,6 +324,7 @@ function App() {
                         availableScripts={availableScripts}
                         onAddNewScript={handleOpenAddScriptModal}
                         onEditScript={handleOpenEditScriptModal}
+                        onDeleteScript={handleDeleteScript}
                         uploadSOP={uploadSOP}
                         rawText={rawText} 
                         setRawText={setRawText} 
@@ -324,7 +357,6 @@ function App() {
                         setModal={setHistoryModal}
                     />
                 )}
-                {/* --- END MODIFICATION --- */}
             </div>
 
             <Modal message={modal.message} visible={modal.visible} onClose={() => setModal({ visible: false, message: '' })} onAddSOP={modal.onAddSOP} />
@@ -336,6 +368,16 @@ function App() {
                 scripts={availableScripts}
                 scriptToEdit={scriptToEdit}
             />
+
+            
+            <ConfirmationModal
+                isOpen={confirmationModal.isOpen}
+                onClose={closeConfirmationModal}
+                onConfirm={confirmationModal.onConfirm}
+                title={confirmationModal.title}
+                message={confirmationModal.message}
+            />
+            
         </div>
     );
 }

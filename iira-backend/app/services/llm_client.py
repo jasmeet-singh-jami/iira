@@ -113,7 +113,7 @@ def get_llm_plan(query: str, context: List[Dict], model: str = MODEL_PLAN) -> Di
 
 def extract_parameters_with_llm(incident_data: Dict, script_params: List[Dict], model: str = MODEL_PARAMS) -> Dict:
     params_to_find = [
-        f"param_name: '{p.get('param_name')}', type: '{p.get('param_type')}', required: '{p.get('required')}'"
+        f"- param_name: '{p.get('param_name')}', type: '{p.get('param_type')}', required: {p.get('required')}"
         for p in script_params if isinstance(p, dict)
     ]
     params_to_find_str = "\n".join(params_to_find)
@@ -158,39 +158,28 @@ def extract_parameters_with_llm(incident_data: Dict, script_params: List[Dict], 
     return extract_json_from_text(response_text) or {}
 
 # Function to parse raw text into a structured SOP
-def get_structured_sop_from_llm(document_text: str, available_scripts: List[Dict]) -> Dict:
+def get_structured_sop_from_llm(document_text: str) -> Dict:
     """
-    Uses the LLM to parse raw text into a structured SOP format.
+    Uses an LLM to parse raw SOP text into a structured JSON format with title, issue,
+    and a list of step descriptions. It does NOT attempt to match scripts.
     """
-    # Use script ID and description
-    scripts_list = [f"- ID: {script['id']} (Description: {script['description']})" for script in available_scripts]
-    scripts_str = "\n".join(scripts_list)
-    
     prompt = f"""
-    You are an AI assistant that converts raw Standard Operating Procedure (SOP) text into a structured JSON format.
-    Your task is to parse the raw text and extract the title, issue, and a list of steps. For each step, provide a description and, if a relevant automated script exists, provide its ID.
-    The issue will be the description of the type of issue it will fix and detail of the steps it will perform to fix the issue.
-    Available Scripts:
-    {scripts_str}
+    You are an AI assistant that converts raw Standard Operating Procedure (SOP) text into a structured JSON object.
 
-    Instructions:
-    1. Always respond with a single JSON object. Do not include any other text, explanations, or markdown.
-    2. The JSON object must have three top-level keys: `title` (string), `issue` (string), and `steps` (array of objects).
-    3. For each step in the `steps` array, use two keys: `description` (string) and **`script_id` (string)**. The description should be detailed.
-    4. **The value for `script_id` MUST be a script's unique ID taken directly and exactly from the "Available Scripts" list. Do not make up a script ID.** 5. Be very conservative about assigning a script ID to `script_id`. Do not use script names from SOP. 
-       If a step has no matching script in Available scripts, set the `script_id` value to `null`.
-    6. Keep the step descriptions concise and focused on the action.
+    Your task:
+    - Parse the "Raw SOP Text" below and extract the `title`, `issue`, and an ordered list of `steps`.
+    - For the `issue`, provide a complete and detailed description of the SOP's purpose and scope.
+    - For each step in the `steps` array, provide a `description` only. Do not include a `script_id` field.
 
-    **Required JSON Output Format:**
+    Rules:
+    - Your entire response must be a single, valid JSON object. Do not include any other text, explanations, or markdown.
+    - The JSON structure must be exactly:
     {{
-    "title": "string",
-    "issue": "string",
-    "steps": [
-        {{
-        "description": "string",
-        "script_id": "string"
-        }}
-    ]
+      "title": "string",
+      "issue": "string",
+      "steps": [
+        {{ "description": "string" }}
+      ]
     }}
 
     Raw SOP Text:
@@ -200,24 +189,20 @@ def get_structured_sop_from_llm(document_text: str, available_scripts: List[Dict
     """
     
     print("----------------------------------------")
-    print("📝 Calling LLM to parse SOP...")
+    print("📝 Calling LLM to parse SOP text (Step A)...")
     print(f"Model: {MODEL_SOP_PARSER}")
-    # print(f"Prompt: {prompt}")  # Uncomment for debugging
     print("----------------------------------------")
 
-    response = call_ollama(prompt, MODEL_SOP_PARSER)
+    response = call_ollama(prompt, model=MODEL_SOP_PARSER)
 
-    try:
-        # The LLM's response should be a JSON string, so we need to parse it
-        print(f"LLM Response: {response}")
-        cleaned = extract_json(response)
-        parsed_json = json.loads(cleaned)
-        print(f"✅ Successfully parsed LLM response into JSON.")
-        return parsed_json
-    except json.JSONDecodeError as e:
-        print(f"❌ Failed to decode JSON from LLM response: {e}")
-        print(f"Raw LLM response: {response}")
-        raise ValueError("Invalid JSON response from LLM.")
+    print(f"LLM Response (Parse Only): {response}")
+    parsed_json = extract_json_from_text(response)
+    if not parsed_json or "steps" not in parsed_json:
+        raise ValueError("Invalid JSON response from LLM during parsing step.")
+    
+    print(f"✅ Successfully parsed SOP text into a structured format.")
+    return parsed_json
+
     
 def extract_json(response: str) -> str:
     """
