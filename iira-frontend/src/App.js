@@ -8,7 +8,7 @@ import History from './components/History';
 import SopDeletion from './components/SopDeletion';
 // --- MODIFICATION: Import ConfirmationModal ---
 import ConfirmationModal from './components/ConfirmationModal'; 
-import { fetchScriptsApi, uploadSOPApi, resolveIncidentApi, executeScriptApi, parseSOPApi, deleteScriptApi } from './services/apis';
+import { fetchScriptsApi, uploadSOPApi, resolveIncidentApi, executeScriptApi, parseSOPApi, deleteScriptApi, matchScriptApi } from './services/apis';
 
 function App() {
     // State for the SOP ingestion form
@@ -131,6 +131,41 @@ function App() {
             setModal({ visible: true, message: 'Failed to parse SOP with AI. ' + error.message });
         } finally {
             setLoading(false);
+        }
+    };
+
+    const handleRematchStepScript = async (stepIndex) => {
+        const currentStep = steps[stepIndex];
+        if (!currentStep || !currentStep.description.trim()) {
+            setModal({ visible: true, message: 'Please enter a description for the step before matching.' });
+            return;
+        }
+
+        // Set loading state for the specific step
+        const updatedSteps = [...steps];
+        updatedSteps[stepIndex].isMatching = true;
+        setSteps(updatedSteps);
+
+        try {
+            const matchResult = await matchScriptApi(currentStep.description);
+            
+            // Create a new array to ensure React detects the state change
+            const newSteps = [...steps];
+            newSteps[stepIndex].script_id = matchResult.script_id;
+            newSteps[stepIndex].script = matchResult.script_name;
+            
+            setModal({ visible: true, message: matchResult.script_name ? `Found match: ${matchResult.script_name}` : 'No confident script match found.' });
+            setSteps(newSteps);
+
+        } catch (error) {
+            setModal({ visible: true, message: error.message });
+        } finally {
+            // Unset loading state for the specific step
+            const finalSteps = [...steps];
+            if (finalSteps[stepIndex]) {
+                finalSteps[stepIndex].isMatching = false;
+                setSteps(finalSteps);
+            }
         }
     };
 
@@ -329,6 +364,7 @@ function App() {
                         rawText={rawText} 
                         setRawText={setRawText} 
                         handleParseDocument={handleParseDocument} 
+                        handleRematchStepScript={handleRematchStepScript}
                         loading={loading}
                         resetSOPSteps={resetSOPSteps}
                     />

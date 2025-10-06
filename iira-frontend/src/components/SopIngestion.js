@@ -1,6 +1,6 @@
 import React, { useState } from 'react';
-// --- MODIFICATION: Import the Trash2 icon ---
-import { Plus, X, ChevronDown, Wand2, RefreshCcw, Loader2, Pencil, Trash2 } from 'lucide-react';
+// --- MODIFICATION: Import Search icon for the new button ---
+import { Plus, X, ChevronDown, Wand2, RefreshCcw, Loader2, Pencil, Trash2, Search } from 'lucide-react';
 // --- END MODIFICATION ---
 import SearchableDropdown from './SearchableDropdown';
 
@@ -18,13 +18,14 @@ const SopIngestion = ({
     availableScripts,
     onAddNewScript,
     onEditScript,
-    // --- MODIFICATION: Add onDeleteScript to the component's props ---
     onDeleteScript,
-    // --- END MODIFICATION ---
     uploadSOP,
     rawText,
     setRawText,
     handleParseDocument,
+    // --- NEW: Receive the rematch handler ---
+    handleRematchStepScript,
+    // --- END NEW ---
     loading,
     resetSOPSteps
 }) => {
@@ -109,19 +110,32 @@ const SopIngestion = ({
                 />
             </div>
 
+
             <div className="space-y-6 mt-6">
                 <h3 className="text-2xl font-bold text-gray-800 border-b pb-2">Steps</h3>
                 {steps.map((step, index) => (
                     <div key={index} className="flex items-start space-x-3 bg-gray-50 p-4 rounded-lg shadow-sm border border-gray-200">
                         <span className="flex-shrink-0 mt-3 font-semibold text-lg text-gray-600">{index + 1}.</span>
                         <div className="flex-grow space-y-2">
-                            <input
-                                type="text"
-                                placeholder="Step Description"
-                                value={step.description || ''}
-                                onChange={e => handleStepChange(index, 'description', e.target.value)}
-                                className="w-full px-4 py-3 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 transition duration-200"
-                            />
+                            {/* --- MODIFICATION: Add Rematch Button --- */}
+                            <div className="flex items-center space-x-2">
+                                <input
+                                    type="text"
+                                    placeholder="Step Description"
+                                    value={step.description || ''}
+                                    onChange={e => handleStepChange(index, 'description', e.target.value)}
+                                    className="w-full px-4 py-3 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 transition duration-200"
+                                />
+                                <button
+                                    onClick={() => handleRematchStepScript(index)}
+                                    disabled={step.isMatching}
+                                    className="p-3 bg-indigo-100 text-indigo-600 rounded-lg shadow-md hover:bg-indigo-200 transition duration-200 flex-shrink-0 disabled:bg-gray-200 disabled:cursor-not-allowed"
+                                    title="Find matching script for this step"
+                                >
+                                    {step.isMatching ? <Loader2 size={20} className="animate-spin" /> : <Search size={20} />}
+                                </button>
+                            </div>
+                            {/* --- END MODIFICATION --- */}
                             <div className="relative flex items-center space-x-2">
                                 <div className="relative flex-grow">
                                     <SearchableDropdown

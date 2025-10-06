@@ -161,3 +161,13 @@ export const deleteScriptApi = async (scriptId) => {
         throw new Error(errorMessage);
     }
 };
+
+export const matchScriptApi = async (description) => {
+    try {
+        const response = await axios.post(`${API_BASE}/api/scripts/match`, { description });
+        return response.data;
+    } catch (error) {
+        console.error("API Error: Error matching script:", error);
+        throw new Error('Failed to find a matching script.');
+    }
+};

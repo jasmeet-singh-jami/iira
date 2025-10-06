@@ -3,7 +3,6 @@
 from fastapi import FastAPI, Path, Query, HTTPException
 from fastapi.responses import JSONResponse
 from fastapi.middleware.cors import CORSMiddleware
-# --- MODIFICATION: Import the new script search and sync functions ---
 from app.services.embed_documents import (
     delete_sop_by_id, 
     embed_and_store_sops, 
@@ -11,11 +10,10 @@ from app.services.embed_documents import (
     sync_scripts_to_qdrant,
     search_scripts_by_description
 )
-# --- END MODIFICATION ---
 from app.services.script_resolver import resolve_scripts
 from app.services.search_sop import search_sop_by_query
 
-from app.services.scripts import get_scripts_from_db, add_script_to_db, get_script_by_name, update_script_in_db, add_incident_history_to_db, update_incident_history, delete_script_from_db
+from app.services.scripts import get_scripts_from_db, add_script_to_db, get_script_by_name, update_script_in_db, add_incident_history_to_db, update_incident_history, delete_script_from_db, get_script_by_id
 from app.services.history import get_incident_history_from_db_paginated
 from app.services.incidents import get_new_unresolved_incidents, update_incident_status, fetch_incident_by_number
 from app.services.llm_client import get_llm_plan, extract_parameters_with_llm, DEFAULT_MODELS, get_structured_sop_from_llm
@@ -107,6 +105,9 @@ class SOPDeleteByIDRequest(BaseModel):
 
 class SOPParseRequest(BaseModel):
     document_text: str    
+
+class MatchScriptRequest(BaseModel):
+    description: str    
 
 async def monitor_new_incidents():
     """
@@ -538,4 +539,34 @@ def delete_script(script_id: int = Path(..., ge=1)):
     except Exception as e:
         # Catch any other potential database errors
         raise HTTPException(status_code=500, detail=f"Failed to delete script: {str(e)}")
+    
+@app.post("/scripts/match", summary="Find the best script match for a single description")
+def match_script_endpoint(request: MatchScriptRequest):
+    """
+    Takes a single step description and performs a vector search to find the best script match.
+    This is used for re-matching a step after a user edits the description.
+    """
+    try:
+        print(f"⚡️ Received request to match description: \"{request.description[:50]}...\"")
+        search_results = search_scripts_by_description(request.description, top_k=1)
+        
+        best_match = search_results[0] if search_results else None
+        
+        if best_match:
+            full_script_details = get_script_by_id(best_match['id'])
+            if full_script_details:
+                return JSONResponse(content={
+                    "script_name": full_script_details['name'],
+                    "script_id": str(full_script_details['id'])
+                }, status_code=200)
+
+        # If no match or details found, return a null response
+        return JSONResponse(content={
+            "script_name": None,
+            "script_id": "Not Found"
+        }, status_code=200)
+
+    except Exception as e:
+        print(f"🔥  Error during single script matching: {e}")
+        raise HTTPException(status_code=500, detail="An error occurred during script matching.")    
 
