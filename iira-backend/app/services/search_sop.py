@@ -2,14 +2,15 @@ from qdrant_client import QdrantClient
 from sentence_transformers import SentenceTransformer
 from app.config import settings
 from app.services.llm_client import generate_hypothetical_sop
+# --- NEW: Import the settings loader ---
+from app.services.settings_service import load_search_thresholds
+# --- END NEW ---
 
-# --- Constants ---
+# --- MODIFICATION: Load thresholds from the database instead of hardcoding ---
+SEARCH_THRESHOLDS = load_search_thresholds()
 MODEL_PATH = "/app/ml_models/all-MiniLM-L6-v2"
 COLLECTION_NAME = "sop_documents"
-# Use a stricter threshold for the initial, fast search
-INITIAL_SEARCH_THRESHOLD = 0.50
-# Use a slightly more lenient threshold for the advanced HyDE search
-HYDE_SEARCH_THRESHOLD = 0.40
+# --- END MODIFICATION ---
 
 # --- Initialize Clients ---
 qdrant_client = QdrantClient(
@@ -46,7 +47,9 @@ def search_sop_by_query(query, top_k=3):
     for result in direct_search_results:
         payload = result.payload
         print(f"Result Score: {result.score:.4f} — Title: {payload.get('title')}")
-        if result.score >= INITIAL_SEARCH_THRESHOLD:
+        # --- MODIFICATION: Use dynamic threshold from database ---
+        if result.score >= SEARCH_THRESHOLDS['INITIAL_SEARCH_THRESHOLD']:
+        # --- END MODIFICATION ---
             filtered_results.append({
                 "title": payload.get("title", ""),
                 "issue": payload.get("issue", ""),
@@ -83,7 +86,9 @@ def search_sop_by_query(query, top_k=3):
     for result in hyde_search_results:
         payload = result.payload
         print(f"Result Score: {result.score:.4f} — Title: {payload.get('title')}")
-        if result.score >= HYDE_SEARCH_THRESHOLD:
+        # --- MODIFICATION: Use dynamic threshold from database ---
+        if result.score >= SEARCH_THRESHOLDS['HYDE_SEARCH_THRESHOLD']:
+        # --- END MODIFICATION ---
             hyde_filtered_results.append({
                 "title": payload.get("title", ""),
                 "issue": payload.get("issue", ""),
