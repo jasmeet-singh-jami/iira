@@ -1,26 +1,41 @@
 import React, { useState, useEffect } from 'react';
-// --- MODIFICATION: Import the RefreshCw icon ---
-import { ChevronDown, ChevronUp, Clock, RefreshCw } from 'lucide-react';
-// --- END MODIFICATION ---
-import { fetchHistoryApi } from '../services/apis';
+import { ChevronDown, ChevronUp, Clock, RefreshCw, BookOpen, FileCode, AlertTriangle } from 'lucide-react';
+import { fetchHistoryApi, fetchSystemStatsApi } from '../services/apis';
 import Modal from './Modal';
 
-const History = () => {
+const History = ({ onDraftSop }) => {
   const [incidentHistory, setIncidentHistory] = useState([]);
   const [loading, setLoading] = useState(true);
   const [expandedIncidents, setExpandedIncidents] = useState({});
   const [modal, setModal] = useState({ visible: false, message: '' });
+
+  // --- NEW: State for system statistics ---
+  const [stats, setStats] = useState({
+    total_scripts: 0,
+    total_sops: 0,
+    total_incidents: 0,
+  });
 
   // Pagination states
   const [page, setPage] = useState(1);
   const [totalPages, setTotalPages] = useState(1);
   const limit = 10; // items per page
 
+  // --- NEW: Function to fetch system stats ---
+  const fetchStats = async () => {
+    try {
+      const systemStats = await fetchSystemStatsApi();
+      setStats(systemStats);
+    } catch (error) {
+      console.error("Failed to fetch system stats:", error.message);
+      // Silently fail or show a non-intrusive error
+    }
+  };
+
   // Function to fetch history data
   const fetchHistory = async () => {
     setLoading(true);
     try {
-      // Updated API call to include page and limit
       const data = await fetchHistoryApi(page, limit);
       setIncidentHistory(data.history);
       setTotalPages(data.total_pages);
@@ -32,21 +47,21 @@ const History = () => {
     }
   };
 
-  // Initial fetch and fetch on page change
+  // Initial fetch for both stats and history
   useEffect(() => {
+    fetchStats();
     fetchHistory();
-    // Dependency array includes 'page' to refetch data on page change
   }, [page]);
 
   // Set up an interval to refresh data every minute
   useEffect(() => {
     const intervalId = setInterval(() => {
+      fetchStats();
       fetchHistory();
     }, 60000); // 60000 ms = 1 minute
 
-    // Cleanup function to clear the interval when the component unmounts
     return () => clearInterval(intervalId);
-  }, [page]); // Re-run the effect if page changes to restart the timer
+  }, [page]);
 
   const toggleExpand = (incidentNumber) => {
     setExpandedIncidents(prev => ({
@@ -90,10 +105,21 @@ const History = () => {
       setPage(page + 1);
     }
   };
+  
+  const StatCard = ({ icon, title, value, colorClass }) => (
+    <div className={`flex-1 p-6 bg-white rounded-2xl shadow-md border border-gray-200 flex items-center space-x-4`}>
+      <div className={`p-3 rounded-full ${colorClass.bg}`}>
+        {icon}
+      </div>
+      <div>
+        <p className="text-gray-500 font-semibold">{title}</p>
+        <p className="text-3xl font-bold text-gray-800">{value}</p>
+      </div>
+    </div>
+  );
 
-  // --- MODIFICATION: Only show the full-page loader on the very first load ---
+
   if (loading && incidentHistory.length === 0) {
-  // --- END MODIFICATION ---
     return (
       <div className="flex justify-center items-center h-40">
         <div className="animate-spin rounded-full h-16 w-16 border-t-2 border-b-2 border-blue-500"></div>
@@ -104,9 +130,37 @@ const History = () => {
 
   return (
     <div className="p-4 space-y-6">
-      <h2 className="text-3xl sm:text-4xl font-extrabold text-blue-800 mb-6 border-b-2 pb-2 border-blue-100">
-        Incident Resolution History
-      </h2>
+      <div className="mb-8">
+        <h2 className="text-3xl sm:text-4xl font-extrabold text-gray-800">
+          System Activity History
+        </h2>
+        <p className="text-gray-500 mt-1">Complete audit trail of all system activities</p>
+      </div>
+
+      {/* --- NEW: System Status Dashboard --- */}
+      <div className="grid grid-cols-1 md:grid-cols-3 gap-6 mb-8">
+        <StatCard 
+          icon={<FileCode size={28} className="text-blue-600" />}
+          title="Total Scripts"
+          value={stats.total_scripts}
+          colorClass={{ bg: 'bg-blue-100' }}
+        />
+        <StatCard 
+          icon={<BookOpen size={28} className="text-green-600" />}
+          title="Active SOPs"
+          value={stats.total_sops}
+          colorClass={{ bg: 'bg-green-100' }}
+        />
+        <StatCard 
+          icon={<AlertTriangle size={28} className="text-purple-600" />}
+          title="Total Incidents"
+          value={stats.total_incidents}
+          colorClass={{ bg: 'bg-purple-100' }}
+        />
+      </div>
+
+      <h3 className="text-2xl font-bold text-gray-700 border-b pb-2">Recent Activity</h3>
+
       {incidentHistory.length === 0 ? (
         <div className="flex flex-col items-center justify-center p-8 bg-gray-50 rounded-lg shadow-inner">
           <Clock size={48} className="text-gray-400 mb-4" />
@@ -132,6 +186,17 @@ const History = () => {
                     Last Updated: {formatDate(incident.resolved_at)}
                   </p>
                 </div>
+                {incident.status === 'SOP not found' && (
+                  <button
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      onDraftSop(incident.incident_data);
+                    }}
+                    className="mr-4 px-4 py-2 bg-purple-600 text-white font-semibold rounded-lg shadow-md hover:bg-purple-700 transition duration-300"
+                  >
+                    Draft SOP with AI
+                  </button>
+                )}
                 <button className="text-blue-600 hover:text-blue-800 transition duration-200">
                   {expandedIncidents[incident.incident_number] ? <ChevronUp size={24} /> : <ChevronDown size={24} />}
                 </button>
@@ -175,7 +240,6 @@ const History = () => {
               )}
             </div>
           ))}
-          {/* Pagination Controls */}
           <div className="flex justify-between items-center mt-6">
             <button
               onClick={handlePrev}
@@ -198,16 +262,14 @@ const History = () => {
         </>
       )}
 
-      {/* --- NEW: Floating Refresh Button --- */}
       <button
-        onClick={fetchHistory}
+        onClick={() => { fetchStats(); fetchHistory(); }}
         disabled={loading}
         className="fixed bottom-10 right-10 bg-blue-600 text-white p-4 rounded-full shadow-lg hover:bg-blue-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-blue-500 transition-transform duration-200 hover:scale-110 disabled:bg-blue-400 disabled:cursor-not-allowed"
         title="Refresh History"
       >
         <RefreshCw size={24} className={loading ? 'animate-spin' : ''} />
       </button>
-      {/* --- END NEW --- */}
       
       <Modal message={modal.message} visible={modal.visible} onClose={() => setModal({ visible: false, message: '' })} />
     </div>
@@ -215,3 +277,4 @@ const History = () => {
 };
 
 export default History;
+

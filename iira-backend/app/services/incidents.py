@@ -6,6 +6,10 @@ from app.config import settings
 from typing import List, Dict, Optional, Any
 import json
 from datetime import datetime
+import logging
+
+# Configure logger
+logger = logging.getLogger(__name__)
 
 # The database connection string for PostgreSQL database.
 DATABASE_URL = settings.database_url
@@ -264,3 +268,21 @@ def fetch_incident_by_number(number: str):
         if conn:
             conn.close()
             print("🔒 Database connection closed.")
+
+def count_incidents() -> int:
+    """
+    Counts the total number of incidents in the database.
+    """
+    conn = None
+    try:
+        conn = psycopg2.connect(DATABASE_URL)
+        cur = conn.cursor()
+        cur.execute("SELECT COUNT(*) FROM incidents;")
+        count = cur.fetchone()[0]
+        return count
+    except (Exception, psycopg2.DatabaseError) as error:
+        logger.error(f"Database error while counting incidents: {error}")
+        return 0
+    finally:
+        if conn:
+            conn.close()

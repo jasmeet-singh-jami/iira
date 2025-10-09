@@ -1,15 +1,15 @@
 # iira/app/services/embed_documents.py
 
 from qdrant_client import QdrantClient
-from qdrant_client.models import VectorParams, Distance, PointStruct, PointIdsList, UpdateStatus
+from qdrant_client.models import VectorParams, Distance, PointStruct, PointIdsList, UpdateStatus, CountResult
 from sentence_transformers import SentenceTransformer
 from app.config import settings
 import uuid
-# --- NEW: Import the script fetching function ---
 from app.services.scripts import get_scripts_from_db
-# --- MODIFICATION: Import List and Dict for type hinting ---
 from typing import List, Dict
-# --- END MODIFICATION ---
+import logging
+
+logger = logging.getLogger(__name__)
 
 
 qdrant_client = QdrantClient(
@@ -174,3 +174,18 @@ def delete_sop_by_id(sop_id: str) -> bool:
         print(f"Error deleting SOP with ID '{sop_id}': {e}")
         return False
 
+def count_sops() -> int:
+    """
+    Counts the total number of SOPs in the Qdrant collection.
+    """
+    try:
+        if not qdrant_client.collection_exists(collection_name=SOP_COLLECTION_NAME):
+            return 0
+        count_result: CountResult = qdrant_client.count(
+            collection_name=SOP_COLLECTION_NAME,
+            exact=True
+        )
+        return count_result.count
+    except Exception as e:
+        logger.error(f"Error counting SOPs in Qdrant: {e}")
+        return 0

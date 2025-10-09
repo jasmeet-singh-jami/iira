@@ -6,48 +6,45 @@ import SopIngestion from './components/SopIngestion';
 import IncidentResolution from './components/IncidentResolution';
 import History from './components/History';
 import SopDeletion from './components/SopDeletion';
-// --- MODIFICATION: Import ConfirmationModal ---
-import ConfirmationModal from './components/ConfirmationModal'; 
-import { fetchScriptsApi, uploadSOPApi, resolveIncidentApi, executeScriptApi, parseSOPApi, deleteScriptApi, matchScriptApi } from './services/apis';
+import ConfirmationModal from './components/ConfirmationModal';
+import ClarificationModal from './components/ClarificationModal';
+import {
+    fetchScriptsApi,
+    uploadSOPApi,
+    resolveIncidentApi,
+    executeScriptApi,
+    parseSOPApi,
+    deleteScriptApi,
+    matchScriptApi,
+    generateSOPApi
+} from './services/apis';
 
 function App() {
-    // State for the SOP ingestion form
     const [title, setTitle] = useState('');
     const [issue, setIssue] = useState('');
     const [steps, setSteps] = useState([{ description: '', script: '' }]);
-    const [rawText, setRawText] = useState(''); 
-
-    // State for the SOP search functionality
+    const [rawText, setRawText] = useState('');
     const [incidentNumber, setIncidentNumber] = useState('');
     const [incidentDetails, setIncidentDetails] = useState(null);
     const [resolvedScripts, setResolvedScripts] = useState([]);
     const [loading, setLoading] = useState(false);
-
-    // New state to manage the 'Execute All' process
     const [isExecutingAll, setIsExecutingAll] = useState(false);
-
-    // Global state
     const [availableScripts, setAvailableScripts] = useState([]);
     const [modal, setModal] = useState({ visible: false, message: '' });
-    
     const [isScriptModalOpen, setIsScriptModalOpen] = useState(false);
     const [scriptToEdit, setScriptToEdit] = useState(null);
-    
     const [activeTab, setActiveTab] = useState('ingest');
-
-    // State for history tab (new)
-    const [incidentHistory, setIncidentHistory] = useState([]);
-    const [loadingHistory, setLoadingHistory] = useState(false);
-    const [historyModal, setHistoryModal] = useState({ visible: false, message: '' });
-
-    // --- NEW: Add state for the confirmation modal ---
     const [confirmationModal, setConfirmationModal] = useState({
         isOpen: false,
         title: '',
         message: '',
         onConfirm: () => {},
     });
-    // --- END NEW ---
+    const [clarification, setClarification] = useState({
+        isNeeded: false,
+        questions: [],
+    });
+    const [userAnswers, setUserAnswers] = useState({});
 
     const fetchScripts = async () => {
         try {
@@ -72,7 +69,7 @@ function App() {
         setScriptToEdit(script);
         setIsScriptModalOpen(true);
     };
-    
+
     const handleCloseScriptModal = () => {
         setIsScriptModalOpen(false);
         setTimeout(() => {
@@ -94,7 +91,7 @@ function App() {
         try {
             const response = await deleteScriptApi(scriptId);
             setModal({ visible: true, message: response.message });
-            fetchScripts(); // Refresh the script list
+            fetchScripts();
         } catch (error) {
             setModal({ visible: true, message: error.message });
         } finally {
@@ -111,7 +108,53 @@ function App() {
         setIssue('');
         setSteps([{ description: '', script: '' }]);
         setRawText('');
-        console.log("Form reset successfully.");
+    };
+
+    const handleGenerateSOP = async () => {
+        if (!rawText.trim()) {
+            setModal({ visible: true, message: 'Please enter a problem description to generate an SOP.' });
+            return;
+        }
+        setLoading(true);
+        try {
+            const response = await generateSOPApi(rawText, null);
+
+            if (response.status === 'clarification_needed') {
+                setClarification({ isNeeded: true, questions: response.questions });
+                const initialAnswers = response.questions.reduce((acc, q) => ({ ...acc, [q]: '' }), {});
+                setUserAnswers(initialAnswers);
+            } else if (response.status === 'sop_generated') {
+                setTitle(response.title);
+                setIssue(response.issue);
+                setSteps(response.steps.map(s => ({...s, isMatching: false })));
+                setModal({ visible: true, message: 'SOP draft generated successfully! Please review the results.' });
+            }
+        } catch (error) {
+            console.error('Error generating SOP:', error);
+            setModal({ visible: true, message: error.message });
+        } finally {
+            setLoading(false);
+        }
+    };
+
+    const handleAnswerSubmission = async () => {
+        setLoading(true);
+        setClarification({ isNeeded: false, questions: [] });
+        try {
+            const response = await generateSOPApi(rawText, userAnswers);
+
+            if (response.status === 'sop_generated') {
+                setTitle(response.title);
+                setIssue(response.issue);
+                setSteps(response.steps.map(s => ({...s, isMatching: false })));
+                setModal({ visible: true, message: 'SOP draft generated successfully from your answers! Please review.' });
+            }
+        } catch (error) {
+            console.error('Error generating SOP with answers:', error);
+            setModal({ visible: true, message: error.message });
+        } finally {
+            setLoading(false);
+        }
     };
 
     const handleParseDocument = async () => {
@@ -125,7 +168,7 @@ function App() {
             setTitle(parsedData.title);
             setIssue(parsedData.issue);
             setSteps(parsedData.steps);
-            setModal({ visible: true, message: 'SOP parsed successfully! Please review the extracted data and make any necessary adjustments before uploading.', onAddSOP: null });
+            setModal({ visible: true, message: 'SOP parsed successfully! Please review the extracted data and make any necessary adjustments before uploading.' });
         } catch (error) {
             console.error('Error parsing SOP:', error);
             setModal({ visible: true, message: 'Failed to parse SOP with AI. ' + error.message });
@@ -141,26 +184,23 @@ function App() {
             return;
         }
 
-        // Set loading state for the specific step
         const updatedSteps = [...steps];
         updatedSteps[stepIndex].isMatching = true;
         setSteps(updatedSteps);
 
         try {
             const matchResult = await matchScriptApi(currentStep.description);
-            
-            // Create a new array to ensure React detects the state change
+
             const newSteps = [...steps];
             newSteps[stepIndex].script_id = matchResult.script_id;
             newSteps[stepIndex].script = matchResult.script_name;
-            
+
             setModal({ visible: true, message: matchResult.script_name ? `Found match: ${matchResult.script_name}` : 'No confident script match found.' });
             setSteps(newSteps);
 
         } catch (error) {
             setModal({ visible: true, message: error.message });
         } finally {
-            // Unset loading state for the specific step
             const finalSteps = [...steps];
             if (finalSteps[stepIndex]) {
                 finalSteps[stepIndex].isMatching = false;
@@ -171,15 +211,15 @@ function App() {
 
     const handleStepChange = (index, field, value) => {
         const updatedSteps = [...steps];
-        
+
         if (field === 'script_id') {
-            const selectedScript = availableScripts.find(s => s.id === value);
+            const selectedScript = availableScripts.find(s => String(s.id) === String(value));
             updatedSteps[index]['script_id'] = value;
-            updatedSteps[index]['script'] = selectedScript ? selectedScript.name : null; 
+            updatedSteps[index]['script'] = selectedScript ? selectedScript.name : null;
         } else {
             updatedSteps[index][field] = value;
         }
-        
+
         setSteps(updatedSteps);
     };
 
@@ -200,9 +240,9 @@ function App() {
 
         const unresolvedStep = steps.find(step => step.script_id === 'Not Found');
         if (unresolvedStep) {
-            setModal({ 
-                visible: true, 
-                message: `Please select a script for all steps. The step starting with "${unresolvedStep.description.substring(0, 40)}..." is missing a script.` 
+            setModal({
+                visible: true,
+                message: `Please select a script for all steps. The step starting with "${unresolvedStep.description.substring(0, 40)}..." is missing a script.`
             });
             return;
         }
@@ -214,9 +254,9 @@ function App() {
             return;
         }
 
-        const payloadSteps = validSteps.map(({ description, script }) => ({
+        const payloadSteps = validSteps.map(({ description, script_id }) => ({
             description,
-            script: script || null
+            script_id: script_id === "Not Found" ? null : script_id
         }));
 
         try {
@@ -233,6 +273,16 @@ function App() {
     const switchToIngestTab = () => {
         setActiveTab('ingest');
         setModal({ visible: false, message: '' });
+    };
+
+    const handleDraftSopFromHistory = (incidentData) => {
+        if (!incidentData) return;
+
+        const problemDescription = `Short Description: ${incidentData.short_description}\nDescription: ${incidentData.description}\nHost/CI: ${incidentData.cmdb_ci}`;
+
+        setRawText(problemDescription);
+
+        setActiveTab('ingest');
     };
 
     const resolveIncident = async () => {
@@ -361,9 +411,10 @@ function App() {
                         onEditScript={handleOpenEditScriptModal}
                         onDeleteScript={handleDeleteScript}
                         uploadSOP={uploadSOP}
-                        rawText={rawText} 
-                        setRawText={setRawText} 
-                        handleParseDocument={handleParseDocument} 
+                        rawText={rawText}
+                        setRawText={setRawText}
+                        handleParseDocument={handleParseDocument}
+                        handleGenerateSOP={handleGenerateSOP}
                         handleRematchStepScript={handleRematchStepScript}
                         loading={loading}
                         resetSOPSteps={resetSOPSteps}
@@ -387,16 +438,13 @@ function App() {
 
                 {activeTab === 'history' && (
                     <History
-                        incidentHistory={incidentHistory}
-                        loading={loadingHistory}
-                        modal={historyModal}
-                        setModal={setHistoryModal}
+                        onDraftSop={handleDraftSopFromHistory}
                     />
                 )}
             </div>
 
             <Modal message={modal.message} visible={modal.visible} onClose={() => setModal({ visible: false, message: '' })} onAddSOP={modal.onAddSOP} />
-            
+
             <AddNewScriptModal
                 isOpen={isScriptModalOpen}
                 onClose={handleCloseScriptModal}
@@ -405,7 +453,6 @@ function App() {
                 scriptToEdit={scriptToEdit}
             />
 
-            
             <ConfirmationModal
                 isOpen={confirmationModal.isOpen}
                 onClose={closeConfirmationModal}
@@ -413,7 +460,16 @@ function App() {
                 title={confirmationModal.title}
                 message={confirmationModal.message}
             />
-            
+
+            <ClarificationModal
+                isOpen={clarification.isNeeded}
+                questions={clarification.questions}
+                answers={userAnswers}
+                setAnswers={setUserAnswers}
+                onSubmit={handleAnswerSubmission}
+                onClose={() => setClarification({ isNeeded: false, questions: [] })}
+                loading={loading}
+            />
         </div>
     );
 }

@@ -3,15 +3,18 @@ import json
 import requests
 import time
 import re
+import logging
 from typing import List, Dict, Any
 from app.config import settings
-import json
+
+# Configure logger
+logger = logging.getLogger(__name__)
 
 # Default models to use for different tasks
 DEFAULT_MODELS = {
-    "plan": "llama3:latest",             
+    "plan": "llama3:latest",
     "param_extraction": "llama3:latest",
-    "sop_parser": "llama3:latest"       
+    "sop_parser": "llama3:latest"
 }
 
 # Default models (can be overridden by environment variables)
@@ -19,6 +22,9 @@ API_URL = settings.ollama_api_url
 MODEL_PLAN = settings.model_plan
 MODEL_PARAMS = settings.model_params
 MODEL_SOP_PARSER = settings.model_sop_parser
+# Assuming MODEL_SOP_GENERATOR is also in settings, similar to the others
+MODEL_SOP_GENERATOR = getattr(settings, 'model_sop_generator', DEFAULT_MODELS["sop_parser"])
+
 
 def call_ollama(prompt: str, model: str) -> str:
     """
@@ -44,10 +50,10 @@ def call_ollama(prompt: str, model: str) -> str:
             retries += 1
             if retries < max_retries:
                 delay = 2 ** retries
-                print(f"[Ollama] Retry {retries}/{max_retries} in {delay}s due to error: {e}")
+                logger.warning(f"[Ollama] Retry {retries}/{max_retries} in {delay}s due to error: {e}")
                 time.sleep(delay)
             else:
-                print(f"[Ollama] Failed after {max_retries} retries: {e}")
+                logger.error(f"[Ollama] Failed after {max_retries} retries: {e}")
                 return ""
     return ""
 
@@ -61,13 +67,9 @@ def extract_json_from_text(text: str) -> Dict:
         json_end = text.rfind('}')
         if json_start != -1 and json_end != -1:
             return json.loads(text[json_start: json_end + 1])
-    # --- MODIFICATION START ---
     except json.JSONDecodeError as e:
-        print(f"❌ JSON decode error: {e}")
-        print("----- Text That Failed to Parse -----")
-        print(text)
-        print("-------------------------------------")
-    # --- MODIFICATION END ---
+        logger.error(f"JSON decode error: {e}")
+        logger.error("----- Text That Failed to Parse -----\n%s\n-------------------------------------", text)
     return {}
 
 
@@ -103,11 +105,9 @@ def get_llm_plan(query: str, context: List[Dict], model: str = MODEL_PLAN) -> Di
     """
 
     response_text = call_ollama(prompt, model=model)
-    # --- MODIFICATION START ---
-    print("\n---------- LLM Raw Response for Plan ----------")
-    print(response_text)
-    print("---------------------------------------------\n")
-    # --- MODIFICATION END ---
+    
+    logger.debug("\n---------- LLM Raw Response for Plan ----------\n%s\n---------------------------------------------\n", response_text)
+    
     return extract_json_from_text(response_text) or {"steps": []}
 
 
@@ -135,7 +135,7 @@ def extract_parameters_with_llm(incident_data: Dict, script_params: List[Dict], 
     - If the value is explicitly mentioned, extract it exactly.
     - If the value can be inferred (e.g., hostname, port, service name), infer it from the incident context.
     - If the parameter has a default_value (provided separately by the system), you may leave it null here 
-        and the system will backfill it.
+      and the system will backfill it.
     - If required and not available, return `null` (never invent random values).
     3. Respect the parameter type:
     - string → plain text
@@ -188,19 +188,16 @@ def get_structured_sop_from_llm(document_text: str) -> Dict:
     JSON Output:
     """
     
-    print("----------------------------------------")
-    print("📝 Calling LLM to parse SOP text (Step A)...")
-    print(f"Model: {MODEL_SOP_PARSER}")
-    print("----------------------------------------")
+    logger.info("📝 Calling LLM to parse SOP text (Step A) using model: %s", MODEL_SOP_PARSER)
 
     response = call_ollama(prompt, model=MODEL_SOP_PARSER)
 
-    print(f"LLM Response (Parse Only): {response}")
+    logger.debug(f"LLM Response (Parse Only): {response}")
     parsed_json = extract_json_from_text(response)
     if not parsed_json or "steps" not in parsed_json:
         raise ValueError("Invalid JSON response from LLM during parsing step.")
     
-    print(f"✅ Successfully parsed SOP text into a structured format.")
+    logger.info("✅ Successfully parsed SOP text into a structured format.")
     return parsed_json
 
     
@@ -226,7 +223,114 @@ def generate_hypothetical_sop(query: str, model: str = DEFAULT_MODELS["sop_parse
 
     Hypothetical SOP Summary:
     """
-    print(f"📝 Generating hypothetical document for query: \"{query}\"")
+    logger.info("📝 Generating hypothetical document for query: \"%s\"", query)
     hypothetical_doc = call_ollama(prompt, model=model)
-    print(f"✅ Generated Document:\n---\n{hypothetical_doc}\n---")
+    logger.info("✅ Generated Document:\n---\n%s\n---", hypothetical_doc)
     return hypothetical_doc
+
+def generate_detailed_sop_from_llm(problem_description: str) -> Dict:
+    """
+    Uses an LLM to generate a complete, detailed, and script-agnostic SOP from a
+    high-level problem description.
+    """
+    prompt = f"""
+    You are an expert Site Reliability Engineer tasked with authoring a new, comprehensive Standard Operating Procedure (SOP).
+    Based on the user's problem description, you will generate a complete, structured SOP in a single JSON object.
+
+    Your task:
+    1.  **Analyze the Problem:** Deeply understand the core issue, potential causes, and impacts from the "Problem Description".
+    2.  **Create a Title:** Write a clear, concise `title` for the new SOP.
+    3.  **Write an Issue Description:** Create a detailed `issue` description that explains the problem, its impact, and the goal of this SOP.
+    4.  **Generate Detailed Steps:** Formulate a logical, step-by-step resolution plan. The steps should be thorough enough for a junior engineer to follow. Include:
+        - Initial diagnostic commands (e.g., how to check disk space, what logs to look at).
+        - Common remediation actions (e.g., how to find and delete large files, how to restart a service).
+        - Verification steps to confirm the issue is resolved.
+        - **IMPORTANT**: Do NOT invent script names or refer to script IDs. Focus only on the manual commands and actions a human would perform.
+
+    Rules:
+    - Your entire response must be a single, valid JSON object with no other text or explanations.
+    - The final JSON structure must be exactly:
+    {{
+        "title": "string",
+        "issue": "string",
+        "steps": [
+            {{
+                "description": "string"
+            }}
+        ]
+    }}
+
+    Problem Description:
+    "{problem_description}"
+
+    JSON Output:
+    """
+    
+    logger.info("📝 Calling LLM to GENERATE new detailed SOP using model: %s", MODEL_SOP_GENERATOR)
+
+    response_text = call_ollama(prompt, model=MODEL_SOP_GENERATOR)
+    logger.debug("LLM Response (SOP Generation): %s", response_text)
+    
+    parsed_json = extract_json_from_text(response_text)
+    if not parsed_json or "steps" not in parsed_json:
+        raise ValueError("Invalid or incomplete JSON response from LLM during SOP generation.")
+    
+    logger.info("✅ Successfully generated a detailed, script-agnostic SOP.")
+    return parsed_json
+
+def get_clarifying_questions_from_llm(problem_description: str) -> Dict:
+    """
+    Analyzes an initial problem description and generates clarifying questions if it's too vague
+    for creating a generalized SOP.
+    """
+    prompt = f"""
+    You are an expert Senior Site Reliability Engineer whose job is to turn an initial incident/problem description into a reusable, generalized Standard Operating Procedure (SOP).
+
+    INSTRUCTIONS:
+    1. Read the provided "Problem Description" carefully and extract every explicit fact from it.
+    2. Produce ONLY one JSON object (no surrounding text) with a single key "questions" whose value is an array of strings:
+    {{
+        "questions": [ "question1", "question2", ... ]
+    }}
+    If no clarifying questions are needed to create a general SOP, output exactly:
+    {{"questions": []}}
+
+    3. Do NOT ask about any fact that is explicitly stated in the Problem Description. If a fact is present but incomplete/ambiguous, ask **one** concise confirmatory question that references the ambiguous fact.
+
+    4. Ask at most 12 questions, ordered by priority (highest first). Each question should be concise (ideally <140 characters) and actionable — answers should directly feed into an SOP template (placeholders, paths, commands, checks, rollback actions, verification).
+
+    5. Prefer questions that produce answers useful for templates, e.g.:
+    - service category/type (web server, database, cache, message broker)
+    - OS/distribution and version
+    - environment (production/staging/dev)
+    - hostnames or naming patterns and preferred placeholder names (e.g., TARGET_HOST)
+    - log file paths and example log lines
+    - key config file paths and sample config keys to check
+    - monitoring/alert conditions and typical alert text
+    - commands to check health and expected outputs
+    - dependencies (databases, storage, load balancers)
+    - required permissions/credentials/tools to run checks/repairs
+    - expected normal behaviour and how to verify recovery
+    - safe rollback or mitigation steps and business impact
+
+    6. Prefer open-but-specific questions (not pure yes/no) unless a yes/no is necessary to choose a remediation path. When asking for placeholder names, suggest an example in parentheses (e.g., "What placeholder should we use for hostname (e.g., TARGET_HOST)?").
+
+    7. If the description mentions a specific error message or log excerpt, ask for a minimal example of that log line or error code to include in the SOP.
+
+    8. Output only JSON, no markdown, no commentary, no extra fields. Each array element must be the question text only (you may include a very short parenthetical hint).
+
+    Problem Description:
+    "{problem_description}"
+
+    JSON Output:
+    """
+    
+    logger.info("📝 Calling LLM to analyze problem and generate clarifying questions...")
+    response_text = call_ollama(prompt, model=MODEL_SOP_GENERATOR)
+    
+    parsed_json = extract_json_from_text(response_text)
+    if "questions" not in parsed_json:
+        return {"questions": []} 
+        
+    logger.info(f"✅ LLM analysis complete. Found {len(parsed_json['questions'])} questions.")
+    return parsed_json

@@ -4,6 +4,9 @@ import psycopg2
 from app.config import settings
 from typing import List, Dict, Optional
 import json
+import logging
+
+logger = logging.getLogger(__name__)
 
 DATABASE_URL = settings.database_url
 
@@ -348,3 +351,21 @@ def delete_script_from_db(script_id: int) -> int:
             cur.close()
         if conn:
             conn.close()
+
+def count_scripts() -> int:
+    """
+    Counts the total number of scripts in the database.
+    """
+    conn = None
+    try:
+        conn = psycopg2.connect(DATABASE_URL)
+        cur = conn.cursor()
+        cur.execute("SELECT COUNT(*) FROM scripts;")
+        count = cur.fetchone()[0]
+        return count
+    except (Exception, psycopg2.DatabaseError) as error:
+        logger.error(f"Database error while counting scripts: {error}")
+        return 0
+    finally:
+        if conn:
+            conn.close()            

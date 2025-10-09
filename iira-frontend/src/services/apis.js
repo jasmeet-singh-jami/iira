@@ -35,12 +35,17 @@ export const uploadSOPApi = async (sopData) => {
 
 /**
  * Resolves an incident by fetching relevant SOPs and scripts.
+ * This function is specifically for the "Test Bed" and will not log to history.
  * @param {string} incidentNumber - The number of the incident to resolve.
  * @returns {Promise<Object>} A promise that resolves to the incident resolution data.
  */
 export const resolveIncidentApi = async (incidentNumber) => {
     try {
-        const response = await axios.get(`${API_BASE}/api/incident/${incidentNumber}`);
+        const response = await axios.get(`${API_BASE}/api/incident/${incidentNumber}`, {
+            params: {
+                source: 'test_bed'
+            }
+        });
         return response.data;
     } catch (error) {
         console.error("API Error: Incident resolution failed:", error);
@@ -169,5 +174,30 @@ export const matchScriptApi = async (description) => {
     } catch (error) {
         console.error("API Error: Error matching script:", error);
         throw new Error('Failed to find a matching script.');
+    }
+};
+
+export const generateSOPApi = async (problemDescription, answers) => {
+    try {
+        const payload = {
+            problem_description: problemDescription,
+            answers: answers,
+        };
+        const response = await axios.post(`${API_BASE}/api/generate_sop`, payload);
+        return response.data;
+    } catch (error) {
+        console.error("API Error: Error generating SOP:", error);
+        const errorMessage = error.response?.data?.detail || 'Failed to generate SOP with AI. Please check the API server.';
+        throw new Error(errorMessage);
+    }
+};
+
+export const fetchSystemStatsApi = async () => {
+    try {
+        const response = await axios.get(`${API_BASE}/api/system/stats`);
+        return response.data;
+    } catch (error) {
+        console.error("API Error: Error fetching system stats:", error);
+        throw new Error('Failed to fetch system statistics.');
     }
 };

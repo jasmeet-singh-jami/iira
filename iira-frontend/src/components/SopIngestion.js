@@ -1,6 +1,6 @@
 import React, { useState } from 'react';
-// --- MODIFICATION: Import Search icon for the new button ---
-import { Plus, X, ChevronDown, Wand2, RefreshCcw, Loader2, Pencil, Trash2, Search } from 'lucide-react';
+// --- MODIFICATION: Import BrainCircuit icon for the new button ---
+import { Plus, X, ChevronDown, Wand2, RefreshCcw, Loader2, Pencil, Trash2, Search, BrainCircuit } from 'lucide-react';
 // --- END MODIFICATION ---
 import SearchableDropdown from './SearchableDropdown';
 
@@ -23,9 +23,10 @@ const SopIngestion = ({
     rawText,
     setRawText,
     handleParseDocument,
-    // --- NEW: Receive the rematch handler ---
-    handleRematchStepScript,
+    // --- NEW: Receive the generator handler ---
+    handleGenerateSOP,
     // --- END NEW ---
+    handleRematchStepScript,
     loading,
     resetSOPSteps
 }) => {
@@ -55,25 +56,37 @@ const SopIngestion = ({
 
             <div className="bg-blue-50 p-6 rounded-xl border border-blue-200 mb-6 shadow-inner">
                 <h3 className="text-xl font-bold text-blue-700 mb-3 flex items-center">
-                    <Wand2 className="h-6 w-6 mr-2" /> AI-Powered SOP Parsing
+                    <Wand2 className="h-6 w-6 mr-2" /> AI-Powered SOP Onboarding
                 </h3>
+                {/* --- MODIFICATION: Updated placeholder text --- */}
                 <p className="text-sm text-gray-600 mb-4">
-                    Paste your raw SOP document below. The AI will automatically extract the title, issue, and structured steps, mapping them to available scripts.
+                    Enter a problem description to generate a new SOP, or paste an existing document to parse it.
                 </p>
                 <textarea
-                    placeholder="Paste your raw SOP document text here..."
+                    placeholder="Describe the problem you want to solve (e.g., 'A web server is down and needs to be restarted') OR paste in a full, pre-written SOP document..."
                     value={rawText}
                     onChange={e => setRawText(e.target.value)}
                     className="w-full px-4 py-3 border border-gray-300 rounded-lg resize-y h-40 focus:outline-none focus:ring-2 focus:ring-blue-500 transition duration-200 text-sm"
                 />
+                {/* --- END MODIFICATION --- */}
                 <div className="flex justify-end space-x-2 mt-4">
+                    {/* --- NEW: "Draft SOP with AI" Button --- */}
+                    <button
+                        onClick={handleGenerateSOP}
+                        disabled={loading}
+                        className={`flex items-center px-6 py-3 rounded-lg font-semibold transition-all duration-300 ${loading ? 'bg-purple-300 cursor-not-allowed' : 'bg-purple-600 text-white shadow-lg hover:bg-purple-700'}`}
+                    >
+                        {loading ? <Loader2 size={20} className="animate-spin mr-2" /> : <BrainCircuit size={20} className="mr-2" />}
+                        {loading ? 'Drafting...' : 'Draft SOP with AI'}
+                    </button>
+                    {/* --- END NEW --- */}
                     <button
                         onClick={handleParseDocument}
                         disabled={loading}
                         className={`flex items-center px-6 py-3 rounded-lg font-semibold transition-all duration-300 ${loading ? 'bg-blue-300 cursor-not-allowed' : 'bg-blue-600 text-white shadow-lg hover:bg-blue-700'}`}
                     >
                         {loading ? <Loader2 size={20} className="animate-spin mr-2" /> : <Wand2 size={20} className="mr-2" />}
-                        {loading ? 'Parsing...' : 'Parse SOP with AI'}
+                        {loading ? 'Parsing...' : 'Parse Existing SOP'}
                     </button>
                 </div>
             </div>
@@ -117,7 +130,6 @@ const SopIngestion = ({
                     <div key={index} className="flex items-start space-x-3 bg-gray-50 p-4 rounded-lg shadow-sm border border-gray-200">
                         <span className="flex-shrink-0 mt-3 font-semibold text-lg text-gray-600">{index + 1}.</span>
                         <div className="flex-grow space-y-2">
-                            {/* --- MODIFICATION: Add Rematch Button --- */}
                             <div className="flex items-center space-x-2">
                                 <input
                                     type="text"
@@ -135,7 +147,6 @@ const SopIngestion = ({
                                     {step.isMatching ? <Loader2 size={20} className="animate-spin" /> : <Search size={20} />}
                                 </button>
                             </div>
-                            {/* --- END MODIFICATION --- */}
                             <div className="relative flex items-center space-x-2">
                                 <div className="relative flex-grow">
                                     <SearchableDropdown
