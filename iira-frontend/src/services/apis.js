@@ -201,3 +201,16 @@ export const fetchSystemStatsApi = async () => {
         throw new Error('Failed to fetch system statistics.');
     }
 };
+
+export const fetchActivityLogApi = async (page = 1, limit = 5) => {
+    try {
+        const response = await axios.get(`${API_BASE}/api/activity_log`, {
+            params: { page, limit }
+        });
+        // This includes { activities, current_page, total_pages }
+        return response.data;
+    } catch (error) {
+        console.error("API Error: Error fetching activity log:", error);
+        throw new Error('Failed to fetch the system activity log.');
+    }
+};

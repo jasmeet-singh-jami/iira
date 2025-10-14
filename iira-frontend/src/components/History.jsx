@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from 'react';
-import { ChevronDown, ChevronUp, Clock, RefreshCw, BookOpen, FileCode, AlertTriangle } from 'lucide-react';
-import { fetchHistoryApi, fetchSystemStatsApi } from '../services/apis';
+import { ChevronDown, ChevronUp, Clock, RefreshCw, BookOpen, FileCode, AlertTriangle, PlusCircle, Trash2, Edit } from 'lucide-react';
+import { fetchHistoryApi, fetchSystemStatsApi, fetchActivityLogApi } from '../services/apis';
 import Modal from './Modal';
 
 const History = ({ onDraftSop }) => {
@@ -9,30 +9,59 @@ const History = ({ onDraftSop }) => {
   const [expandedIncidents, setExpandedIncidents] = useState({});
   const [modal, setModal] = useState({ visible: false, message: '' });
 
-  // --- NEW: State for system statistics ---
+  // --- MODIFIED: State for progressive loading of activities ---
+  const [activityLog, setActivityLog] = useState([]);
+  const [loadingActivities, setLoadingActivities] = useState(true);
+  const [activityPage, setActivityPage] = useState(1);
+  const [hasMoreActivities, setHasMoreActivities] = useState(true);
+
   const [stats, setStats] = useState({
-    total_scripts: 0,
     total_sops: 0,
+    total_scripts: 0,
     total_incidents: 0,
   });
 
-  // Pagination states
+  // Pagination states for incident history
   const [page, setPage] = useState(1);
   const [totalPages, setTotalPages] = useState(1);
   const limit = 10; // items per page
 
-  // --- NEW: Function to fetch system stats ---
-  const fetchStats = async () => {
+  // --- MODIFIED: Function to fetch and append activities ---
+  const fetchActivities = async (currentPage) => {
+    // Only set loading to true for the initial fetch
+    if (currentPage === 1) {
+        setLoadingActivities(true);
+    }
     try {
-      const systemStats = await fetchSystemStatsApi();
-      setStats(systemStats);
+      const data = await fetchActivityLogApi(currentPage);
+      // --- FIX: Add a check to ensure data and data.activities are valid ---
+      if (data && data.activities) {
+        // Append new activities to the existing log on "Load More", otherwise replace
+        setActivityLog(prev => currentPage === 1 ? data.activities : [...prev, ...data.activities]);
+        // Check if there are more pages to load
+        setHasMoreActivities(data.current_page < data.total_pages);
+      } else {
+        // If the response is invalid, stop trying to load more.
+        setHasMoreActivities(false);
+      }
     } catch (error) {
-      console.error("Failed to fetch system stats:", error.message);
-      // Silently fail or show a non-intrusive error
+      console.error("Failed to fetch activities:", error.message);
+      setModal({ visible: true, message: 'Failed to load system activities.' });
+    } finally {
+      setLoadingActivities(false);
     }
   };
 
-  // Function to fetch history data
+  const fetchStats = async () => {
+    try {
+      const data = await fetchSystemStatsApi();
+      setStats(data);
+    } catch (error) {
+      console.error(error.message);
+      // Do not show a modal for stats failing, just log it.
+    }
+  };
+
   const fetchHistory = async () => {
     setLoading(true);
     try {
@@ -47,21 +76,42 @@ const History = ({ onDraftSop }) => {
     }
   };
 
-  // Initial fetch for both stats and history
+  // Initial fetch for incident history and stats
   useEffect(() => {
     fetchStats();
     fetchHistory();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [page]);
-
-  // Set up an interval to refresh data every minute
+  
+  // Separate effect for initial activity fetch
   useEffect(() => {
-    const intervalId = setInterval(() => {
-      fetchStats();
-      fetchHistory();
-    }, 60000); // 60000 ms = 1 minute
+    fetchActivities(1); // Fetch the first page of activities on mount
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
+  // Set up an interval to refresh all data every minute
+  const refreshAllData = () => {
+    fetchStats();
+    if (page === 1) {
+        fetchHistory();
+    } else {
+        setPage(1); // This will trigger the history fetch via useEffect
+    }
+    setActivityPage(1);
+    fetchActivities(1);
+  };
+
+  useEffect(() => {
+    const intervalId = setInterval(refreshAllData, 60000); // 60000 ms = 1 minute
     return () => clearInterval(intervalId);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [page]);
+
+  const handleLoadMoreActivities = () => {
+    const nextPage = activityPage + 1;
+    setActivityPage(nextPage);
+    fetchActivities(nextPage);
+  };
 
   const toggleExpand = (incidentNumber) => {
     setExpandedIncidents(prev => ({
@@ -71,9 +121,9 @@ const History = ({ onDraftSop }) => {
   };
 
   const formatDate = (dateString) => {
-    if (!dateString) return 'In Progress';
+    if (!dateString) return 'N/A';
     const date = new Date(dateString);
-    return date.toLocaleDateString() + ' ' + date.toLocaleTimeString();
+    return date.toLocaleString();
   };
 
   const getStatusColor = (status) => {
@@ -93,7 +143,6 @@ const History = ({ onDraftSop }) => {
     }
   };
 
-  // Pagination handlers
   const handlePrev = () => {
     if (page > 1) {
       setPage(page - 1);
@@ -105,19 +154,52 @@ const History = ({ onDraftSop }) => {
       setPage(page + 1);
     }
   };
-  
+
+  const handleDraftSopClick = (incident) => {
+    if (onDraftSop) {
+      onDraftSop(incident);
+    }
+  };
+
   const StatCard = ({ icon, title, value, colorClass }) => (
-    <div className={`flex-1 p-6 bg-white rounded-2xl shadow-md border border-gray-200 flex items-center space-x-4`}>
-      <div className={`p-3 rounded-full ${colorClass.bg}`}>
+    <div className={`flex items-center p-4 bg-white rounded-xl shadow-lg border border-gray-200 ${colorClass}`}>
+      <div className="p-3 bg-opacity-20 rounded-full">
         {icon}
       </div>
-      <div>
-        <p className="text-gray-500 font-semibold">{title}</p>
+      <div className="ml-4">
+        <p className="text-sm font-medium text-gray-500">{title}</p>
         <p className="text-3xl font-bold text-gray-800">{value}</p>
       </div>
     </div>
   );
 
+  const ActivityItem = ({ activity }) => {
+    const ICONS = {
+      CREATE_SCRIPT: <PlusCircle className="text-green-500" size={20} />,
+      UPDATE_SCRIPT: <Edit className="text-yellow-500" size={20} />,
+      DELETE_SCRIPT: <Trash2 className="text-red-500" size={20} />,
+      CREATE_SOP: <PlusCircle className="text-green-500" size={20} />,
+      DELETE_SOP: <Trash2 className="text-red-500" size={20} />,
+    };
+
+    const TITLES = {
+      CREATE_SCRIPT: `New script created: "${activity.details.script_name}"`,
+      UPDATE_SCRIPT: `Script updated: "${activity.details.script_name}"`,
+      DELETE_SCRIPT: `Script deleted: "${activity.details.script_name}"`,
+      CREATE_SOP: `New SOP ingested: "${activity.details.sop_title}"`,
+      DELETE_SOP: `SOP deleted: "ID: ${activity.details.sop_id}"`,
+    };
+
+    return (
+      <li className="flex items-center space-x-4 p-3 hover:bg-gray-50 rounded-lg">
+        <div className="flex-shrink-0">{ICONS[activity.activity_type] || <AlertTriangle size={20} />}</div>
+        <div className="flex-1 min-w-0">
+          <p className="text-sm font-semibold text-gray-700 truncate">{TITLES[activity.activity_type] || 'Unknown Activity'}</p>
+        </div>
+        <div className="text-xs text-gray-400 flex-shrink-0">{formatDate(activity.timestamp)}</div>
+      </li>
+    );
+  };
 
   if (loading && incidentHistory.length === 0) {
     return (
@@ -130,38 +212,60 @@ const History = ({ onDraftSop }) => {
 
   return (
     <div className="p-4 space-y-6">
-      <div className="mb-8">
-        <h2 className="text-3xl sm:text-4xl font-extrabold text-gray-800">
-          System Activity History
-        </h2>
-        <p className="text-gray-500 mt-1">Complete audit trail of all system activities</p>
-      </div>
+      <h2 className="text-3xl sm:text-4xl font-extrabold text-blue-800 mb-6 border-b-2 pb-2 border-blue-100">
+        System Activity History
+      </h2>
 
-      {/* --- NEW: System Status Dashboard --- */}
-      <div className="grid grid-cols-1 md:grid-cols-3 gap-6 mb-8">
+      <div className="grid grid-cols-1 sm:grid-cols-3 gap-6">
         <StatCard 
-          icon={<FileCode size={28} className="text-blue-600" />}
-          title="Total Scripts"
+          icon={<FileCode size={24} className="text-blue-500" />} 
+          title="Total Scripts" 
           value={stats.total_scripts}
-          colorClass={{ bg: 'bg-blue-100' }}
+          colorClass="bg-blue-50"
         />
         <StatCard 
-          icon={<BookOpen size={28} className="text-green-600" />}
-          title="Active SOPs"
+          icon={<BookOpen size={24} className="text-green-500" />} 
+          title="Active SOPs" 
           value={stats.total_sops}
-          colorClass={{ bg: 'bg-green-100' }}
+          colorClass="bg-green-50"
         />
         <StatCard 
-          icon={<AlertTriangle size={28} className="text-purple-600" />}
-          title="Total Incidents"
+          icon={<AlertTriangle size={24} className="text-purple-500" />} 
+          title="Total Incidents" 
           value={stats.total_incidents}
-          colorClass={{ bg: 'bg-purple-100' }}
+          colorClass="bg-purple-50"
         />
       </div>
 
       <h3 className="text-2xl font-bold text-gray-700 border-b pb-2">Recent Activity</h3>
+      
+      {loadingActivities && activityLog.length === 0 ? (
+        <p className="text-gray-500">Loading activities...</p>
+      ) : activityLog.length > 0 ? (
+        <div>
+            <ul className="space-y-1 bg-white p-4 rounded-xl border border-gray-200 shadow-sm">
+                {activityLog.map((activity) => (
+                    <ActivityItem key={activity.id} activity={activity} />
+                ))}
+            </ul>
+            {hasMoreActivities && (
+                <div className="text-center mt-4">
+                    <button
+                        onClick={handleLoadMoreActivities}
+                        disabled={loadingActivities}
+                        className="text-sm font-semibold text-blue-600 hover:text-blue-800 transition disabled:text-gray-400"
+                    >
+                        {loadingActivities ? 'Loading...' : 'Load More'}
+                    </button>
+                </div>
+            )}
+        </div>
+      ) : (
+        <p className="text-gray-500 p-4">No system activities found.</p>
+      )}
 
-      {incidentHistory.length === 0 ? (
+      <h3 className="text-2xl font-bold text-gray-700 border-b pb-2 mt-8">Incident Resolution History</h3>
+      {incidentHistory.length === 0 && !loading ? (
         <div className="flex flex-col items-center justify-center p-8 bg-gray-50 rounded-lg shadow-inner">
           <Clock size={48} className="text-gray-400 mb-4" />
           <p className="text-xl text-gray-500 font-semibold">No history found.</p>
@@ -175,10 +279,10 @@ const History = ({ onDraftSop }) => {
                 onClick={() => toggleExpand(incident.incident_number)}
                 className="cursor-pointer flex justify-between items-center"
               >
-                <div className="flex-1">
-                  <h3 className="text-xl font-bold text-gray-800 flex items-center">
-                    Incident: {incident.incident_number}
-                    <span className={`ml-3 px-3 py-1 text-sm font-semibold rounded-full ${getStatusColor(incident.status)}`}>
+                <div className="flex-1 min-w-0">
+                  <h3 className="text-xl font-bold text-gray-800 flex items-center flex-wrap">
+                    <span className="mr-3">Incident: {incident.incident_number}</span>
+                    <span className={`px-3 py-1 text-sm font-semibold rounded-full ${getStatusColor(incident.status)}`}>
                       {incident.status}
                     </span>
                   </h3>
@@ -186,18 +290,18 @@ const History = ({ onDraftSop }) => {
                     Last Updated: {formatDate(incident.resolved_at)}
                   </p>
                 </div>
-                {incident.status === 'SOP not found' && (
-                  <button
-                    onClick={(e) => {
-                      e.stopPropagation();
-                      onDraftSop(incident.incident_data);
-                    }}
-                    className="mr-4 px-4 py-2 bg-purple-600 text-white font-semibold rounded-lg shadow-md hover:bg-purple-700 transition duration-300"
-                  >
-                    Draft SOP with AI
-                  </button>
-                )}
-                <button className="text-blue-600 hover:text-blue-800 transition duration-200">
+                 {incident.status === 'SOP not found' && (
+                   <button
+                     onClick={(e) => {
+                       e.stopPropagation();
+                       handleDraftSopClick(incident);
+                     }}
+                     className="ml-4 flex-shrink-0 px-3 py-1.5 bg-green-600 text-white text-xs font-semibold rounded-full shadow-md hover:bg-green-700 transition"
+                   >
+                     Draft SOP with AI
+                   </button>
+                 )}
+                <button className="text-blue-600 hover:text-blue-800 transition duration-200 ml-4 flex-shrink-0">
                   {expandedIncidents[incident.incident_number] ? <ChevronUp size={24} /> : <ChevronDown size={24} />}
                 </button>
               </div>
@@ -263,12 +367,12 @@ const History = ({ onDraftSop }) => {
       )}
 
       <button
-        onClick={() => { fetchStats(); fetchHistory(); }}
-        disabled={loading}
+        onClick={refreshAllData}
+        disabled={loading || loadingActivities}
         className="fixed bottom-10 right-10 bg-blue-600 text-white p-4 rounded-full shadow-lg hover:bg-blue-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-blue-500 transition-transform duration-200 hover:scale-110 disabled:bg-blue-400 disabled:cursor-not-allowed"
         title="Refresh History"
       >
-        <RefreshCw size={24} className={loading ? 'animate-spin' : ''} />
+        <RefreshCw size={24} className={(loading || loadingActivities) ? 'animate-spin' : ''} />
       </button>
       
       <Modal message={modal.message} visible={modal.visible} onClose={() => setModal({ visible: false, message: '' })} />

@@ -60,6 +60,10 @@ function App() {
         fetchScripts();
     }, []);
 
+    useEffect(() => {
+        window.scrollTo(0, 0);
+    }, [activeTab]);
+
     const handleOpenAddScriptModal = () => {
         setScriptToEdit(null);
         setIsScriptModalOpen(true);
@@ -275,13 +279,17 @@ function App() {
         setModal({ visible: false, message: '' });
     };
 
-    const handleDraftSopFromHistory = (incidentData) => {
-        if (!incidentData) return;
+    const handleDraftSopFromHistory = (incident) => {
+        if (!incident || !incident.incident_data) {
+            setModal({ visible: true, message: 'Could not load incident data to draft an SOP.' });
+            return;
+        }
 
-        const problemDescription = `Short Description: ${incidentData.short_description}\nDescription: ${incidentData.description}\nHost/CI: ${incidentData.cmdb_ci}`;
+        const { short_description, description, cmdb_ci } = incident.incident_data;
 
+        const problemDescription = `Short Description: ${short_description || 'N/A'}\nDescription: ${description || 'N/A'}\nHost/CI: ${cmdb_ci || 'N/A'}`;
+        
         setRawText(problemDescription);
-
         setActiveTab('ingest');
     };
 

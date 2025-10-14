@@ -13,6 +13,7 @@ from app.services.embed_documents import (
 )
 from app.services.script_resolver import resolve_scripts, resolve_scripts_by_id
 from app.services.search_sop import search_sop_by_query
+from app.services.activity_log_service import add_activity_log, get_activity_log_paginated
 
 from app.services.scripts import (
     get_scripts_from_db, 
@@ -139,7 +140,7 @@ class MatchScriptRequest(BaseModel):
 
 class GenerateSOPRequest(BaseModel):
     problem_description: str
-    answers: Optional[Dict[str, str]] = None   
+    answers: Optional[Dict[str, str]] = None  
 
 async def monitor_new_incidents():
     """
@@ -283,9 +284,14 @@ def ingest_sop(request: IngestRequest):
     logger.info(f"📄 Executing ingest function for {len(request.sops)} SOP(s).")
     sop_dicts = [sop.model_dump() for sop in request.sops]
     embed_and_store_sops(sop_dicts)
+    
+    # --- NEW: Log this activity ---
+    for sop in request.sops:
+        add_activity_log("CREATE_SOP", {"sop_title": sop.title})
+    # --- END NEW ---
+
     return {"message": "SOP(s) ingested successfully"}
 
-# --- MODIFICATION: Sync Qdrant after adding, updating, or deleting scripts ---
 @app.post("/scripts/add")
 def add_script(request: AddScriptRequest):
     """
@@ -296,6 +302,11 @@ def add_script(request: AddScriptRequest):
         add_script_to_db(request.name, request.description, request.tags, request.content, request.params)
         logger.info("🔄 Triggering Qdrant sync after add...")
         sync_scripts_to_qdrant()
+        
+        # --- NEW: Log this activity ---
+        add_activity_log("CREATE_SCRIPT", {"script_name": request.name})
+        # --- END NEW ---
+
         return JSONResponse(content={"message": "Script added successfully"}, status_code=200)
     except ValueError as e:
         raise HTTPException(status_code=409, detail=str(e))
@@ -320,13 +331,17 @@ def update_script(request: UpdateScriptRequest):
         )
         logger.info("🔄 Triggering Qdrant sync after update...")
         sync_scripts_to_qdrant()
+
+        # --- NEW: Log this activity ---
+        add_activity_log("UPDATE_SCRIPT", {"script_id": request.id, "script_name": request.name})
+        # --- END NEW ---
+
         return JSONResponse(content={"message": "Script updated successfully"}, status_code=200)
     except ValueError as e:
         raise HTTPException(status_code=409, detail=str(e))
     except Exception as e:
         logger.error(f"Failed to update script with ID {request.id}", exc_info=True)
         raise HTTPException(status_code=500, detail=f"Failed to update script: {str(e)}")
-# --- END MODIFICATION ---
 
 @app.get("/scripts")
 def get_scripts():
@@ -493,11 +508,21 @@ def delete_sop(request: SOPDeleteByIDRequest):
     """
     Deletes an SOP document from the Qdrant collection.
     """
+    # --- MODIFICATION: Need to fetch SOP details before deleting to log them ---
+    all_sops = get_all_sops()
+    sop_to_delete = next((sop for sop in all_sops if sop['id'] == request.sop_id), None)
+    
+    if not sop_to_delete:
+        raise HTTPException(status_code=404, detail=f"No SOP found with the sop_id '{request.sop_id}'.")
+
     deleted = delete_sop_by_id(request.sop_id)
     if deleted:
+        # Log this activity
+        add_activity_log("DELETE_SOP", {"sop_id": request.sop_id, "sop_title": sop_to_delete.get('title', 'N/A')})
         return JSONResponse(content={"message": f"SOP with sop_id '{request.sop_id}' deleted successfully."}, status_code=200)
     else:
-        raise HTTPException(status_code=404, detail=f"No SOP found with the sop_id '{request.sop_id}'.")
+        # This part might be redundant now due to the check above, but good for safety.
+        raise HTTPException(status_code=404, detail=f"Failed to delete SOP with the sop_id '{request.sop_id}'.")
 
 @app.post("/parse_sop", summary="Parse raw SOP text and match steps to scripts using vector search")
 def parse_sop_endpoint(request: SOPParseRequest):
@@ -564,13 +589,22 @@ def delete_script(script_id: int = Path(..., ge=1)):
     Deletes a script from the database and triggers a sync with the Qdrant search index.
     """
     try:
+        # --- MODIFICATION: Fetch script details before deleting for logging ---
+        script_details = get_script_by_id(script_id)
+        if not script_details:
+             raise HTTPException(status_code=404, detail=f"Script with ID {script_id} not found.")
+
         logger.info(f"🗑️ Deleting script with ID: {script_id}")
         deleted_rows = delete_script_from_db(script_id)
         if deleted_rows == 0:
+            # This is a fallback, the check above should handle it.
             raise HTTPException(status_code=404, detail=f"Script with ID {script_id} not found.")
         
         logger.info("🔄 Triggering Qdrant sync after delete...")
         sync_scripts_to_qdrant()
+
+        # Log this activity
+        add_activity_log("DELETE_SCRIPT", {"script_id": script_id, "script_name": script_details.get('name', 'N/A')})
         
         return JSONResponse(content={"message": f"Script with ID {script_id} deleted successfully."}, status_code=200)
     except Exception as e:
@@ -696,3 +730,16 @@ def get_system_stats():
     except Exception as e:
         logger.error("Failed to retrieve system stats", exc_info=True)
         raise HTTPException(status_code=500, detail="Failed to retrieve system statistics.")
+
+@app.get("/activity_log", summary="Get the system activity log")
+def get_activity_log_endpoint(page: int = Query(1, ge=1), limit: int = Query(5, ge=1, le=100)):
+    """
+    Retrieves a paginated list of system activities.
+    """
+    try:
+        result = get_activity_log_paginated(page, limit)
+        return JSONResponse(content=result, status_code=200)
+    except Exception as e:
+        logger.error("Failed to retrieve activity log", exc_info=True)
+        raise HTTPException(status_code=500, detail="Failed to retrieve activity log.")
+
