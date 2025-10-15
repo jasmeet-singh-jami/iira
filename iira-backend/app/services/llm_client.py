@@ -86,9 +86,11 @@ def get_llm_plan(query: str, context: List[Dict], model: str = MODEL_PLAN) -> Di
                                for step in steps])
         context_string += f"Context Document {i+1}:\nTitle: {title}\nIssue: {issue}\nSteps:\n{step_list}\n\n"
 
+    logger.info(f"TOOL: context_string: {context_string}")        
+
     prompt = f"""
     You are an AI assistant acting as an Incident Resolution Manager.
-    Task: Convert a query + SOP context into a JSON plan with actionable steps.
+    Task: Convert a query + SOP context into a JSON plan with actionable steps. Do not skip, summarize, or rephrase any steps.
     
     Query: "{query}"
     Context:

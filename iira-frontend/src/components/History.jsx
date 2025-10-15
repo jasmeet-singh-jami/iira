@@ -34,14 +34,14 @@ const History = ({ onDraftSop }) => {
     }
     try {
       const data = await fetchActivityLogApi(currentPage);
-      // --- FIX: Add a check to ensure data and data.activities are valid ---
+      // Ensure data and data.activities are valid before processing
       if (data && data.activities) {
-        // Append new activities to the existing log on "Load More", otherwise replace
+        // If it's the first page, replace the log; otherwise, append to it.
         setActivityLog(prev => currentPage === 1 ? data.activities : [...prev, ...data.activities]);
-        // Check if there are more pages to load
+        // Determine if there are more pages to load
         setHasMoreActivities(data.current_page < data.total_pages);
       } else {
-        // If the response is invalid, stop trying to load more.
+        // If the response is invalid, assume no more activities
         setHasMoreActivities(false);
       }
     } catch (error) {
@@ -58,7 +58,6 @@ const History = ({ onDraftSop }) => {
       setStats(data);
     } catch (error) {
       console.error(error.message);
-      // Do not show a modal for stats failing, just log it.
     }
   };
 
@@ -66,8 +65,10 @@ const History = ({ onDraftSop }) => {
     setLoading(true);
     try {
       const data = await fetchHistoryApi(page, limit);
-      setIncidentHistory(data.history);
-      setTotalPages(data.total_pages);
+      if (data && data.history) {
+        setIncidentHistory(data.history);
+        setTotalPages(data.total_pages);
+      }
     } catch (error) {
       console.error(error.message);
       setModal({ visible: true, message: 'Failed to load history. ' + error.message });
@@ -83,30 +84,34 @@ const History = ({ onDraftSop }) => {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [page]);
   
-  // Separate effect for initial activity fetch
+  // Separate effect for the initial fetch of activities
   useEffect(() => {
-    fetchActivities(1); // Fetch the first page of activities on mount
+    fetchActivities(1);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  // Set up an interval to refresh all data every minute
+  // --- MODIFIED: Function to handle refreshing all data ---
   const refreshAllData = () => {
     fetchStats();
-    if (page === 1) {
-        fetchHistory();
+    // Reset incident history to page 1
+    if (page !== 1) {
+        setPage(1);
     } else {
-        setPage(1); // This will trigger the history fetch via useEffect
+        fetchHistory();
     }
+    // Reset activity log to page 1
     setActivityPage(1);
     fetchActivities(1);
   };
 
+  // Set up an interval to refresh data every minute
   useEffect(() => {
-    const intervalId = setInterval(refreshAllData, 60000); // 60000 ms = 1 minute
+    const intervalId = setInterval(refreshAllData, 60000); 
     return () => clearInterval(intervalId);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [page]);
+  }, [page]); // Rerun if the incident page changes
 
+  // --- NEW: Function to handle the "Load More" button click ---
   const handleLoadMoreActivities = () => {
     const nextPage = activityPage + 1;
     setActivityPage(nextPage);
@@ -187,16 +192,16 @@ const History = ({ onDraftSop }) => {
       UPDATE_SCRIPT: `Script updated: "${activity.details.script_name}"`,
       DELETE_SCRIPT: `Script deleted: "${activity.details.script_name}"`,
       CREATE_SOP: `New SOP ingested: "${activity.details.sop_title}"`,
-      DELETE_SOP: `SOP deleted: "ID: ${activity.details.sop_id}"`,
+      DELETE_SOP: `SOP deleted: "${activity.details.sop_title}"`,
     };
 
     return (
       <li className="flex items-center space-x-4 p-3 hover:bg-gray-50 rounded-lg">
         <div className="flex-shrink-0">{ICONS[activity.activity_type] || <AlertTriangle size={20} />}</div>
-        <div className="flex-1 min-w-0">
-          <p className="text-sm font-semibold text-gray-700 truncate">{TITLES[activity.activity_type] || 'Unknown Activity'}</p>
+        <div className="flex-1">
+          <p className="text-sm font-semibold text-gray-700">{TITLES[activity.activity_type] || 'Unknown Activity'}</p>
         </div>
-        <div className="text-xs text-gray-400 flex-shrink-0">{formatDate(activity.timestamp)}</div>
+        <div className="text-xs text-gray-400">{formatDate(activity.timestamp)}</div>
       </li>
     );
   };
@@ -238,34 +243,36 @@ const History = ({ onDraftSop }) => {
       </div>
 
       <h3 className="text-2xl font-bold text-gray-700 border-b pb-2">Recent Activity</h3>
-      
+
+      {/* --- MODIFIED: Section for displaying the activity log with "Load More" --- */}
       {loadingActivities && activityLog.length === 0 ? (
         <p className="text-gray-500">Loading activities...</p>
       ) : activityLog.length > 0 ? (
         <div>
-            <ul className="space-y-1 bg-white p-4 rounded-xl border border-gray-200 shadow-sm">
-                {activityLog.map((activity) => (
-                    <ActivityItem key={activity.id} activity={activity} />
-                ))}
-            </ul>
-            {hasMoreActivities && (
-                <div className="text-center mt-4">
-                    <button
-                        onClick={handleLoadMoreActivities}
-                        disabled={loadingActivities}
-                        className="text-sm font-semibold text-blue-600 hover:text-blue-800 transition disabled:text-gray-400"
-                    >
-                        {loadingActivities ? 'Loading...' : 'Load More'}
-                    </button>
-                </div>
-            )}
+          <ul className="space-y-1 bg-white p-4 rounded-xl border border-gray-200 shadow-sm">
+            {activityLog.map((activity) => (
+              <ActivityItem key={activity.id} activity={activity} />
+            ))}
+          </ul>
+          {hasMoreActivities && (
+            <div className="text-center mt-4">
+              <button
+                onClick={handleLoadMoreActivities}
+                disabled={loadingActivities}
+                className="text-sm font-semibold text-blue-600 hover:text-blue-800 transition disabled:text-gray-400"
+              >
+                {loadingActivities ? 'Loading...' : 'Load More'}
+              </button>
+            </div>
+          )}
         </div>
       ) : (
         <p className="text-gray-500 p-4">No system activities found.</p>
       )}
+      {/* --- END MODIFICATION --- */}
 
       <h3 className="text-2xl font-bold text-gray-700 border-b pb-2 mt-8">Incident Resolution History</h3>
-      {incidentHistory.length === 0 && !loading ? (
+      {incidentHistory.length === 0 ? (
         <div className="flex flex-col items-center justify-center p-8 bg-gray-50 rounded-lg shadow-inner">
           <Clock size={48} className="text-gray-400 mb-4" />
           <p className="text-xl text-gray-500 font-semibold">No history found.</p>
@@ -290,18 +297,18 @@ const History = ({ onDraftSop }) => {
                     Last Updated: {formatDate(incident.resolved_at)}
                   </p>
                 </div>
-                 {incident.status === 'SOP not found' && (
-                   <button
-                     onClick={(e) => {
-                       e.stopPropagation();
-                       handleDraftSopClick(incident);
-                     }}
-                     className="ml-4 flex-shrink-0 px-3 py-1.5 bg-green-600 text-white text-xs font-semibold rounded-full shadow-md hover:bg-green-700 transition"
-                   >
-                     Draft SOP with AI
-                   </button>
-                 )}
-                <button className="text-blue-600 hover:text-blue-800 transition duration-200 ml-4 flex-shrink-0">
+                {incident.status === 'SOP not found' && (
+                  <button
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      handleDraftSopClick(incident);
+                    }}
+                    className="mr-4 px-3 py-1.5 bg-green-600 text-white text-xs font-semibold rounded-full shadow-md hover:bg-green-700 transition"
+                  >
+                    Draft SOP with AI
+                  </button>
+                )}
+                <button className="text-blue-600 hover:text-blue-800 transition duration-200">
                   {expandedIncidents[incident.incident_number] ? <ChevronUp size={24} /> : <ChevronDown size={24} />}
                 </button>
               </div>
@@ -325,7 +332,7 @@ const History = ({ onDraftSop }) => {
                       incident.resolved_scripts.map((script, index) => (
                         <div key={index} className="bg-gray-50 p-3 rounded-lg mt-2 space-y-1">
                           <p className="font-semibold text-gray-700">{index + 1}. {script.script_name || script.step_description}</p>
-                          {script.script_name && (
+                          {script.script_name && script.extracted_parameters && (
                             <p className="text-sm text-gray-600">
                                 <span className="font-medium">Parameters:</span>
                                 <span className="font-mono ml-2">{JSON.stringify(script.extracted_parameters)}</span>
