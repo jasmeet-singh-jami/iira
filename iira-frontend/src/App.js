@@ -16,13 +16,15 @@ import {
     parseSOPApi,
     deleteScriptApi,
     matchScriptApi,
-    generateSOPApi
+    generateSOPApi,
+    generateScriptFromContextApi // 1. Import the New API Function
 } from './services/apis';
 
 function App() {
     const [title, setTitle] = useState('');
     const [issue, setIssue] = useState('');
-    const [steps, setSteps] = useState([{ description: '', script: '' }]);
+    // 2. Update Step State
+    const [steps, setSteps] = useState([{ description: '', script: '', isMatching: false, isCreating: false }]);
     const [rawText, setRawText] = useState('');
     const [incidentNumber, setIncidentNumber] = useState('');
     const [incidentDetails, setIncidentDetails] = useState(null);
@@ -110,7 +112,8 @@ function App() {
     const resetSOPSteps = () => {
         setTitle('');
         setIssue('');
-        setSteps([{ description: '', script: '' }]);
+        // 4. Update resetSOPSteps
+        setSteps([{ description: '', script: '', isMatching: false, isCreating: false }]);
         setRawText('');
     };
 
@@ -130,7 +133,7 @@ function App() {
             } else if (response.status === 'sop_generated') {
                 setTitle(response.title);
                 setIssue(response.issue);
-                setSteps(response.steps.map(s => ({...s, isMatching: false })));
+                setSteps(response.steps.map(s => ({...s, isMatching: false, isCreating: false })));
                 setModal({ visible: true, message: 'SOP draft generated successfully! Please review the results.' });
             }
         } catch (error) {
@@ -150,7 +153,7 @@ function App() {
             if (response.status === 'sop_generated') {
                 setTitle(response.title);
                 setIssue(response.issue);
-                setSteps(response.steps.map(s => ({...s, isMatching: false })));
+                setSteps(response.steps.map(s => ({...s, isMatching: false, isCreating: false })));
                 setModal({ visible: true, message: 'SOP draft generated successfully from your answers! Please review.' });
             }
         } catch (error) {
@@ -171,8 +174,8 @@ function App() {
             const parsedData = await parseSOPApi(rawText);
             setTitle(parsedData.title);
             setIssue(parsedData.issue);
-            setSteps(parsedData.steps);
-            setModal({ visible: true, message: 'SOP parsed successfully! Please review the extracted data and make any necessary adjustments before uploading.' });
+            setSteps(parsedData.steps.map(s => ({...s, isMatching: false, isCreating: false })));
+            setModal({ visible: true, message: 'SOP parsed successfully! Please review the extracted data.' });
         } catch (error) {
             console.error('Error parsing SOP:', error);
             setModal({ visible: true, message: 'Failed to parse SOP with AI. ' + error.message });
@@ -188,47 +191,80 @@ function App() {
             return;
         }
 
-        const updatedSteps = [...steps];
-        updatedSteps[stepIndex].isMatching = true;
+        let updatedSteps = [...steps];
+        updatedSteps[stepIndex] = { ...updatedSteps[stepIndex], isMatching: true };
         setSteps(updatedSteps);
 
         try {
             const matchResult = await matchScriptApi(currentStep.description);
-
-            const newSteps = [...steps];
-            newSteps[stepIndex].script_id = matchResult.script_id;
-            newSteps[stepIndex].script = matchResult.script_name;
-
+            updatedSteps = [...steps]; // Re-fetch state in case it changed
+            updatedSteps[stepIndex] = { 
+                ...updatedSteps[stepIndex], 
+                script_id: matchResult.script_id, 
+                script: matchResult.script_name 
+            };
             setModal({ visible: true, message: matchResult.script_name ? `Found match: ${matchResult.script_name}` : 'No confident script match found.' });
-            setSteps(newSteps);
+        } catch (error) {
+            setModal({ visible: true, message: error.message });
+        } finally {
+            updatedSteps = [...steps];
+            updatedSteps[stepIndex] = { ...updatedSteps[stepIndex], isMatching: false };
+            setSteps(updatedSteps);
+        }
+    };
+
+    // 3. Create the Handler Function
+    const handleCreateScriptForStep = async (stepIndex) => {
+        const targetStep = steps[stepIndex];
+        if (!targetStep || !targetStep.description.trim()) {
+            setModal({ visible: true, message: 'Please provide a description for the step before generating a script.' });
+            return;
+        }
+
+        let updatedSteps = [...steps];
+        updatedSteps[stepIndex] = { ...updatedSteps[stepIndex], isCreating: true };
+        setSteps(updatedSteps);
+
+        try {
+            const context = {
+                title: title,
+                issue: issue,
+                steps: steps.map(s => s.description),
+                target_step_description: targetStep.description
+            };
+
+            const generatedScript = await generateScriptFromContextApi(context);
+            
+            setScriptToEdit(generatedScript);
+            setIsScriptModalOpen(true);
 
         } catch (error) {
             setModal({ visible: true, message: error.message });
         } finally {
-            const finalSteps = [...steps];
-            if (finalSteps[stepIndex]) {
-                finalSteps[stepIndex].isMatching = false;
-                setSteps(finalSteps);
-            }
+            updatedSteps = [...steps];
+            updatedSteps[stepIndex] = { ...updatedSteps[stepIndex], isCreating: false };
+            setSteps(updatedSteps);
         }
     };
 
     const handleStepChange = (index, field, value) => {
         const updatedSteps = [...steps];
+        const step = { ...updatedSteps[index] };
 
         if (field === 'script_id') {
             const selectedScript = availableScripts.find(s => String(s.id) === String(value));
-            updatedSteps[index]['script_id'] = value;
-            updatedSteps[index]['script'] = selectedScript ? selectedScript.name : null;
+            step.script_id = value;
+            step.script = selectedScript ? selectedScript.name : null;
         } else {
-            updatedSteps[index][field] = value;
+            step[field] = value;
         }
-
+        updatedSteps[index] = step;
         setSteps(updatedSteps);
     };
 
     const addStep = () => {
-        setSteps([...steps, { description: '', script: '' }]);
+        // 4. Update addStep
+        setSteps([...steps, { description: '', script: '', isMatching: false, isCreating: false }]);
     };
 
     const removeStep = (index) => {
@@ -284,11 +320,8 @@ function App() {
             setModal({ visible: true, message: 'Could not load incident data to draft an SOP.' });
             return;
         }
-
         const { short_description, description, cmdb_ci } = incident.incident_data;
-
         const problemDescription = `Short Description: ${short_description || 'N/A'}\nDescription: ${description || 'N/A'}\nHost/CI: ${cmdb_ci || 'N/A'}`;
-        
         setRawText(problemDescription);
         setActiveTab('ingest');
     };
@@ -424,6 +457,8 @@ function App() {
                         handleParseDocument={handleParseDocument}
                         handleGenerateSOP={handleGenerateSOP}
                         handleRematchStepScript={handleRematchStepScript}
+                        // 5. Pass the Prop
+                        onCreateScriptForStep={handleCreateScriptForStep}
                         loading={loading}
                         resetSOPSteps={resetSOPSteps}
                     />

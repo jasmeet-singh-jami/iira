@@ -214,3 +214,23 @@ export const fetchActivityLogApi = async (page = 1, limit = 5) => {
         throw new Error('Failed to fetch the system activity log.');
     }
 };
+
+/**
+ * Sends the full SOP context to the backend to generate a script for a specific step.
+ * @param {Object} context - The context object.
+ * @param {string} context.title - The title of the SOP.
+ * @param {string} context.issue - The issue description of the SOP.
+ * @param {Array<string>} context.steps - An array of all step descriptions.
+ * @param {string} context.target_step_description - The specific step to generate a script for.
+ * @returns {Promise<Object>} A promise that resolves to the AI-generated script object.
+ */
+export const generateScriptFromContextApi = async (context) => {
+    try {
+        const response = await axios.post(`${API_BASE}/api/scripts/generate_from_context`, context);
+        return response.data;
+    } catch (error) {
+        console.error("API Error: Error generating script from context:", error);
+        const errorMessage = error.response?.data?.detail || 'Failed to generate script with AI. Please check the API server.';
+        throw new Error(errorMessage);
+    }
+};

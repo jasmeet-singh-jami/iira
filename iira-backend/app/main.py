@@ -3,8 +3,8 @@
 from fastapi import FastAPI, Path, Query, HTTPException
 from fastapi.responses import JSONResponse
 from fastapi.middleware.cors import CORSMiddleware
+from app.services.search_sop import search_sop_by_query
 
-# --- MODIFIED: Import agents and remove unused services ---
 from app.agents.resolver_agent import ResolverAgent
 from app.services.embed_documents import (
     delete_sop_by_id,
@@ -37,9 +37,9 @@ from app.services.llm_client import (
     get_structured_sop_from_llm,
     generate_detailed_sop_from_llm,
     get_clarifying_questions_from_llm,
-    get_llm_plan
+    get_llm_plan,
+    generate_script_from_context_llm
 )
-# --- END MODIFICATION ---
 
 from pydantic import BaseModel
 from typing import List, Dict, Optional, Any
@@ -126,6 +126,12 @@ class MatchScriptRequest(BaseModel):
 class GenerateSOPRequest(BaseModel):
     problem_description: str
     answers: Optional[Dict[str, str]] = None
+
+class GenerateScriptContext(BaseModel):
+    title: str
+    issue: str
+    steps: List[str]
+    target_step_description: str    
 
 async def monitor_new_incidents():
     """
@@ -506,3 +512,15 @@ def get_activity_log_endpoint(page: int = Query(1, ge=1), limit: int = Query(5, 
         logger.error("Failed to retrieve activity log", exc_info=True)
         raise HTTPException(status_code=500, detail="Failed to retrieve activity log.")
 
+@app.post("/scripts/generate_from_context", summary="Generate a script from SOP context using AI")
+def generate_script_endpoint(context: GenerateScriptContext):
+    """
+    Takes the context of an SOP draft and a target step, and uses an LLM
+    to generate a complete script object to automate that step.
+    """
+    try:
+        script_object = generate_script_from_context_llm(context.model_dump())
+        return JSONResponse(content=script_object, status_code=200)
+    except Exception as e:
+        logger.exception("🔥 Error during AI-powered script generation")
+        raise HTTPException(status_code=500, detail=f"An error occurred during script generation: {str(e)}")

@@ -5,31 +5,32 @@ import Modal from './Modal'; // Assuming a simple modal component
 import { saveScriptApi, updateScriptApi } from '../services/apis';
 
 const AddNewScriptModal = ({ isOpen, onClose, onScriptAdded, scripts, scriptToEdit }) => {
-    const isEditMode = Boolean(scriptToEdit);
+    // This logic is now correct for determining the mode.
+    const isEditMode = Boolean(scriptToEdit && scriptToEdit.id);
 
     const [name, setName] = useState('');
     const [description, setDescription] = useState('');
     const [tags, setTags] = useState('');
     const [content, setContent] = useState('');
-    // --- NEW: State for script_type ---
     const [scriptType, setScriptType] = useState('shell_script');
-    // --- END NEW ---
     const [params, setParams] = useState([{ param_name: '', param_type: 'string', required: true, default_value: '' }]);
     const [modalMessage, setModalMessage] = useState({ visible: false, message: '' });
 
+    // --- MODIFICATION: Updated useEffect to handle three states ---
     useEffect(() => {
         if (isOpen) {
-            if (isEditMode && scriptToEdit) {
+            // Case 1 & 2: If there is a script object passed (either for editing or AI pre-fill)
+            if (scriptToEdit) {
                 setName(scriptToEdit.name || '');
                 setDescription(scriptToEdit.description || '');
                 setTags(Array.isArray(scriptToEdit.tags) ? scriptToEdit.tags.join(', ') : '');
                 setContent(scriptToEdit.content || '');
-                // --- NEW: Set script_type in edit mode ---
                 setScriptType(scriptToEdit.script_type || 'shell_script');
-                // --- END NEW ---
+                // Ensure params are an array, even if the AI returns an empty one
                 setParams(scriptToEdit.params && scriptToEdit.params.length > 0 ? scriptToEdit.params : [{ param_name: '', param_type: 'string', required: true, default_value: '' }]);
-            } else {
-                // Reset form for "add new" mode
+            } 
+            // Case 3: If there is no script object, it's a blank "Add New"
+            else {
                 setName('');
                 setDescription('');
                 setTags('');
@@ -38,7 +39,8 @@ const AddNewScriptModal = ({ isOpen, onClose, onScriptAdded, scripts, scriptToEd
                 setParams([{ param_name: '', param_type: 'string', required: true, default_value: '' }]);
             }
         }
-    }, [isOpen, scriptToEdit, isEditMode]);
+    }, [isOpen, scriptToEdit]); // This effect now correctly depends on the scriptToEdit object itself.
+    // --- END MODIFICATION ---
 
     const handleParamChange = (index, field, value) => {
         const updatedParams = [...params];
@@ -75,7 +77,7 @@ const AddNewScriptModal = ({ isOpen, onClose, onScriptAdded, scripts, scriptToEd
             description,
             tags: tags.split(',').map(tag => tag.trim()).filter(tag => tag),
             content,
-            script_type: scriptType, // Include script_type in the payload
+            script_type: scriptType,
             params: params.filter(param => param.param_name.trim())
         };
 
@@ -91,7 +93,7 @@ const AddNewScriptModal = ({ isOpen, onClose, onScriptAdded, scripts, scriptToEd
             setTimeout(() => {
                 setModalMessage({ visible: false, message: '' });
                 onClose();
-                onScriptAdded(); // Refresh the scripts list in the parent
+                onScriptAdded();
             }, 1500);
 
         } catch (error) {
@@ -115,7 +117,6 @@ const AddNewScriptModal = ({ isOpen, onClose, onScriptAdded, scripts, scriptToEd
                 <div className="space-y-4 max-h-[70vh] overflow-y-auto pr-2">
                     <input type="text" placeholder="Script Name" value={name} onChange={e => setName(e.target.value)} className="w-full px-4 py-3 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500" />
                     
-                    {/* --- NEW: Script Type Dropdown --- */}
                     <div className="relative">
                         <label className="text-sm font-medium text-gray-600 mb-1 block">Script Type</label>
                         <select 
@@ -129,7 +130,6 @@ const AddNewScriptModal = ({ isOpen, onClose, onScriptAdded, scripts, scriptToEd
                         </select>
                         <div className="pointer-events-none absolute inset-y-0 right-0 top-6 flex items-center px-2 text-gray-700"><ChevronDown className="h-4 w-4" /></div>
                     </div>
-                    {/* --- END NEW --- */}
 
                     <textarea placeholder="Script Description" value={description} onChange={e => setDescription(e.target.value)} className="w-full px-4 py-3 border border-gray-300 rounded-lg resize-y h-24 focus:outline-none focus:ring-2 focus:ring-blue-500" />
                     <input type="text" placeholder="Tags (comma-separated)" value={tags} onChange={e => setTags(e.target.value)} className="w-full px-4 py-3 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500" />
@@ -168,11 +168,11 @@ const AddNewScriptModal = ({ isOpen, onClose, onScriptAdded, scripts, scriptToEd
                         <Save size={20} className="mr-2" /> {isEditMode ? 'Update Script' : 'Save Script'}
                     </button>
                 </div>
+                <Modal message={modalMessage.message} visible={modalMessage.visible} onClose={() => setModalMessage({ visible: false, message: '' })} />
             </div>
-            {/* This uses a simplified, generic modal for feedback */}
-            <Modal message={modalMessage.message} visible={modalMessage.visible} onClose={() => setModalMessage({ visible: false, message: '' })} />
         </div>
     );
 };
 
 export default AddNewScriptModal;
+
