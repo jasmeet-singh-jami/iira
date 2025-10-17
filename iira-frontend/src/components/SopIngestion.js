@@ -1,7 +1,6 @@
 import React, { useState } from 'react';
-// --- MODIFICATION: Import BrainCircuit icon for the new button ---
-import { Plus, X, ChevronDown, Wand2, RefreshCcw, Loader2, Pencil, Trash2, Search, BrainCircuit } from 'lucide-react';
-// --- END MODIFICATION ---
+// --- MODIFICATION: Import Sparkles icon for the new button ---
+import { Plus, X, ChevronDown, Wand2, RefreshCcw, Loader2, Pencil, Trash2, Search, BrainCircuit, Sparkles } from 'lucide-react';
 import SearchableDropdown from './SearchableDropdown';
 
 const SopIngestion = ({
@@ -23,10 +22,11 @@ const SopIngestion = ({
     rawText,
     setRawText,
     handleParseDocument,
-    // --- NEW: Receive the generator handler ---
     handleGenerateSOP,
-    // --- END NEW ---
     handleRematchStepScript,
+    // --- NEW: Receive the AI script creation handler ---
+    onCreateScriptForStep,
+    // --- END NEW ---
     loading,
     resetSOPSteps
 }) => {
@@ -58,7 +58,6 @@ const SopIngestion = ({
                 <h3 className="text-xl font-bold text-blue-700 mb-3 flex items-center">
                     <Wand2 className="h-6 w-6 mr-2" /> AI-Powered SOP Onboarding
                 </h3>
-                {/* --- MODIFICATION: Updated placeholder text --- */}
                 <p className="text-sm text-gray-600 mb-4">
                     Enter a problem description to generate a new SOP, or paste an existing document to parse it.
                 </p>
@@ -68,9 +67,7 @@ const SopIngestion = ({
                     onChange={e => setRawText(e.target.value)}
                     className="w-full px-4 py-3 border border-gray-300 rounded-lg resize-y h-40 focus:outline-none focus:ring-2 focus:ring-blue-500 transition duration-200 text-sm"
                 />
-                {/* --- END MODIFICATION --- */}
                 <div className="flex justify-end space-x-2 mt-4">
-                    {/* --- NEW: "Draft SOP with AI" Button --- */}
                     <button
                         onClick={handleGenerateSOP}
                         disabled={loading}
@@ -79,7 +76,6 @@ const SopIngestion = ({
                         {loading ? <Loader2 size={20} className="animate-spin mr-2" /> : <BrainCircuit size={20} className="mr-2" />}
                         {loading ? 'Drafting...' : 'Draft SOP with AI'}
                     </button>
-                    {/* --- END NEW --- */}
                     <button
                         onClick={handleParseDocument}
                         disabled={loading}
@@ -140,12 +136,22 @@ const SopIngestion = ({
                                 />
                                 <button
                                     onClick={() => handleRematchStepScript(index)}
-                                    disabled={step.isMatching}
+                                    disabled={step.isMatching || step.isCreating}
                                     className="p-3 bg-indigo-100 text-indigo-600 rounded-lg shadow-md hover:bg-indigo-200 transition duration-200 flex-shrink-0 disabled:bg-gray-200 disabled:cursor-not-allowed"
                                     title="Find matching script for this step"
                                 >
                                     {step.isMatching ? <Loader2 size={20} className="animate-spin" /> : <Search size={20} />}
                                 </button>
+                                {/* --- NEW: "Create Script with AI" Button --- */}
+                                <button
+                                    onClick={() => onCreateScriptForStep(index)}
+                                    disabled={step.isMatching || step.isCreating}
+                                    className="p-3 bg-green-100 text-green-600 rounded-lg shadow-md hover:bg-green-200 transition duration-200 flex-shrink-0 disabled:bg-gray-200 disabled:cursor-not-allowed"
+                                    title="Create a new script for this step using AI"
+                                >
+                                    {step.isCreating ? <Loader2 size={20} className="animate-spin" /> : <Sparkles size={20} />}
+                                </button>
+                                {/* --- END NEW --- */}
                             </div>
                             <div className="relative flex items-center space-x-2">
                                 <div className="relative flex-grow">
@@ -201,4 +207,3 @@ const SopIngestion = ({
 };
 
 export default SopIngestion;
-

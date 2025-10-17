@@ -37,7 +37,20 @@ def embed_and_store_sops(sops):
     points = []
     print(f"📄 Executing embed_and_store_sops function for {len(sops)} SOPs")
     for sop in sops:
-        content = f"Title: {sop['title']}. Issue: {sop['issue']}. " + " ".join(step["description"] for step in sop["steps"])
+        # --- Create a richer content string for each step ---
+        step_contents = []
+        for step in sop.get('steps', []):
+            description = step.get('description', '')
+            script = step.get('script') # The script name is now available here
+            if script:
+                # If a script exists, include it in the text to be embedded
+                step_contents.append(f"{description} (using the script: {script})")
+            else:
+                step_contents.append(description)
+        
+        # --- Combine everything into the final content string ---
+        content = f"Title: {sop.get('title', '')}. Issue: {sop.get('issue', '')}. Steps: {' '.join(step_contents)}"
+        print(f"✅ Storing content '{content}' of SOP in Qdrant.")
         vector = embedder.encode(content).tolist()
         point = PointStruct(
             id=str(uuid.uuid4()),

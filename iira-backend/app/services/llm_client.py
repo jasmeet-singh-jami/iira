@@ -22,9 +22,13 @@ API_URL = settings.ollama_api_url
 MODEL_PLAN = settings.model_plan
 MODEL_PARAMS = settings.model_params
 MODEL_SOP_PARSER = settings.model_sop_parser
-# Assuming MODEL_SOP_GENERATOR is also in settings, similar to the others
-MODEL_SOP_GENERATOR = getattr(settings, 'model_sop_generator', DEFAULT_MODELS["sop_parser"])
+MODEL_SOP_GENERATOR = settings.model_sop_parser
 
+import re
+import json
+import logging
+
+logger = logging.getLogger(__name__)
 
 def call_ollama(prompt: str, model: str) -> str:
     """
@@ -86,9 +90,11 @@ def get_llm_plan(query: str, context: List[Dict], model: str = MODEL_PLAN) -> Di
                                for step in steps])
         context_string += f"Context Document {i+1}:\nTitle: {title}\nIssue: {issue}\nSteps:\n{step_list}\n\n"
 
+    logger.info(f"TOOL: context_string: {context_string}")        
+
     prompt = f"""
     You are an AI assistant acting as an Incident Resolution Manager.
-    Task: Convert a query + SOP context into a JSON plan with actionable steps.
+    Task: Convert a query + SOP context into a JSON plan with actionable steps. Do not skip, summarize, or rephrase any steps.
     
     Query: "{query}"
     Context:
@@ -333,4 +339,76 @@ def get_clarifying_questions_from_llm(problem_description: str) -> Dict:
         return {"questions": []} 
         
     logger.info(f"✅ LLM analysis complete. Found {len(parsed_json['questions'])} questions.")
+    return parsed_json
+
+def generate_script_from_context_llm(sop_context: Dict) -> Dict:
+    """
+    Generates a complete, structured script object from the context of an SOP draft.
+    """
+    # Unpack the context for the prompt
+    title = sop_context.get("title")
+    issue = sop_context.get("issue")
+    all_steps = "\n".join([f"- {step}" for step in sop_context.get("steps", [])])
+    target_step = sop_context.get("target_step_description")
+
+    prompt = f"""
+    You are an expert DevOps engineer and a master scriptwriter. Your task is to author a complete, production-ready shell script based on the context of a Standard Operating Procedure (SOP) and a specific step.
+
+    Your output MUST be a single, valid JSON object with no other text or explanations.
+
+    **Full SOP Context:**
+    - **Title:** {title}
+    - **Issue:** {issue}
+    - **All Steps:**
+    {all_steps}
+
+    **Your Target:**
+    Your goal is to create a script that automates the following specific step:
+    - **Target Step:** "{target_step}"
+
+    **Instructions:**
+    Based on all the information above, generate a JSON object with the following structure:
+    {{
+      "name": "string (a descriptive, short name for the script, e.g., 'check-disk-space.sh')",
+      "description": "string (a clear, one-sentence description of what the script does)",
+      "content": "string (the full #!/bin/bash script content, formatted as a SINGLE-LINE JSON string with all newlines properly escaped as \\n)",
+      "params": [
+        {{
+          "param_name": "string (e.g., 'HOSTNAME')",
+          "param_type": "string (e.g., 'string', 'integer', 'boolean')",
+          "required": "boolean (true if the script cannot run without this parameter)"
+        }}
+      ]
+    }}
+
+    **Parameter Rules:**
+    - Identify any variables in the target step that would need to be passed as arguments to the script. These are your parameters.
+    - Use clear, uppercase parameter names (e.g., 'TARGET_DIRECTORY', 'SERVICE_NAME').
+
+    **Final JSON Output:**
+    """
+    
+    logger.info("🤖 Calling LLM to generate a new script from SOP context...")
+    response_text = call_ollama(prompt, model=settings.model_sop_parser)
+    logger.debug("LLM Response (Script Generation): %s", response_text)
+    
+    # Use a regular expression to find the JSON block, ignoring surrounding text
+    json_match = re.search(r'\{.*\}', response_text, re.DOTALL)
+    if not json_match:
+        logger.error(f"No JSON object found in LLM response. Raw output: {response_text}")
+        raise ValueError("Invalid or incomplete JSON response from LLM: No JSON object found.")
+
+    json_string = json_match.group(0)
+    
+    try:
+        # The JSON from the LLM should now be valid thanks to the improved prompt
+        parsed_json = json.loads(json_string)
+    except json.JSONDecodeError as e:
+        logger.error(f"Failed to parse extracted JSON string. Error: {e}. String: {json_string}")
+        raise ValueError("Invalid or incomplete JSON response from LLM: Failed to parse JSON.")
+
+    if not all(k in parsed_json for k in ["name", "description", "content", "params"]):
+        raise ValueError("Invalid or incomplete JSON response from LLM during script generation: Missing required keys.")
+    
+    logger.info(f"✅ Successfully generated script draft: '{parsed_json.get('name')}'")
     return parsed_json
