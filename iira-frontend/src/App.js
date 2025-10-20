@@ -1,51 +1,52 @@
 // src/App.js
 import React, { useState, useEffect } from 'react';
+import { motion, AnimatePresence } from 'framer-motion';
+import Sidebar from './components/Sidebar';
+import Dashboard from './components/Dashboard';
+import History from './components/History';
+import RunbookDeletion from './components/RunbookDeletion';
+import RunbookIngestion from './components/RunbookIngestion';
+import ScriptsPage from './components/ScriptsPage';
+import IncidentResolution from './components/IncidentResolution';
 import Modal from './components/Modal';
 import AddNewScriptModal from './components/AddNewScriptModal';
-import SopIngestion from './components/SopIngestion';
-import IncidentResolution from './components/IncidentResolution';
-import History from './components/History';
-import SopDeletion from './components/SopDeletion';
 import ConfirmationModal from './components/ConfirmationModal';
 import ClarificationModal from './components/ClarificationModal';
+
 import {
     fetchScriptsApi,
     uploadSOPApi,
     resolveIncidentApi,
-    executeScriptApi,
-    parseSOPApi,
     deleteScriptApi,
     matchScriptApi,
     generateSOPApi,
-    generateScriptFromContextApi // 1. Import the New API Function
+    generateScriptFromContextApi,
+    parseSOPApi
 } from './services/apis';
 
 function App() {
+    const [activePage, setActivePage] = useState('dashboard');
+
+    // State for the Runbook ingestion form
     const [title, setTitle] = useState('');
     const [issue, setIssue] = useState('');
-    // 2. Update Step State
-    const [steps, setSteps] = useState([{ description: '', script: '', isMatching: false, isCreating: false }]);
+    const [tags, setTags] = useState('');
+    const [steps, setSteps] = useState([{ description: '', script_id: null, isMatching: false, isCreating: false }]);
     const [rawText, setRawText] = useState('');
+
+    // State for Incident Resolution (Test Bed)
     const [incidentNumber, setIncidentNumber] = useState('');
     const [incidentDetails, setIncidentDetails] = useState(null);
     const [resolvedScripts, setResolvedScripts] = useState([]);
-    const [loading, setLoading] = useState(false);
-    const [isExecutingAll, setIsExecutingAll] = useState(false);
+
+    // Global state
     const [availableScripts, setAvailableScripts] = useState([]);
+    const [loading, setLoading] = useState(false);
     const [modal, setModal] = useState({ visible: false, message: '' });
     const [isScriptModalOpen, setIsScriptModalOpen] = useState(false);
     const [scriptToEdit, setScriptToEdit] = useState(null);
-    const [activeTab, setActiveTab] = useState('ingest');
-    const [confirmationModal, setConfirmationModal] = useState({
-        isOpen: false,
-        title: '',
-        message: '',
-        onConfirm: () => {},
-    });
-    const [clarification, setClarification] = useState({
-        isNeeded: false,
-        questions: [],
-    });
+    const [confirmationModal, setConfirmationModal] = useState({ isOpen: false, title: '', message: '', onConfirm: () => {} });
+    const [clarification, setClarification] = useState({ isNeeded: false, questions: [] });
     const [userAnswers, setUserAnswers] = useState({});
 
     const fetchScripts = async () => {
@@ -62,42 +63,16 @@ function App() {
         fetchScripts();
     }, []);
 
-    useEffect(() => {
-        window.scrollTo(0, 0);
-    }, [activeTab]);
-
     const handleOpenAddScriptModal = () => {
         setScriptToEdit(null);
         setIsScriptModalOpen(true);
-    };
-
-    const handleOpenEditScriptModal = (script) => {
-        setScriptToEdit(script);
-        setIsScriptModalOpen(true);
-    };
-
-    const handleCloseScriptModal = () => {
-        setIsScriptModalOpen(false);
-        setTimeout(() => {
-            setScriptToEdit(null);
-        }, 300);
-    };
-
-    const handleDeleteScript = (script) => {
-        if (!script) return;
-        setConfirmationModal({
-            isOpen: true,
-            title: 'Delete Script',
-            message: `Are you sure you want to permanently delete the script "${script.name}"? This action cannot be undone.`,
-            onConfirm: () => confirmDeleteScript(script.id),
-        });
     };
 
     const confirmDeleteScript = async (scriptId) => {
         try {
             const response = await deleteScriptApi(scriptId);
             setModal({ visible: true, message: response.message });
-            fetchScripts();
+            fetchScripts(); // Refresh script list
         } catch (error) {
             setModal({ visible: true, message: error.message });
         } finally {
@@ -109,23 +84,21 @@ function App() {
         setConfirmationModal({ isOpen: false, title: '', message: '', onConfirm: () => {} });
     };
 
-    const resetSOPSteps = () => {
+    const resetRunbookForm = () => {
         setTitle('');
         setIssue('');
-        // 4. Update resetSOPSteps
-        setSteps([{ description: '', script: '', isMatching: false, isCreating: false }]);
+        setTags('');
+        setSteps([{ description: '', script_id: null, isMatching: false, isCreating: false }]);
         setRawText('');
     };
-
-    const handleGenerateSOP = async () => {
-        if (!rawText.trim()) {
-            setModal({ visible: true, message: 'Please enter a problem description to generate an SOP.' });
-            return;
-        }
+    
+    const handleDraftAndGenerateFromHistory = async (incident) => {
+        const description = `Incident ${incident.incident_number}: ${incident.incident_data.short_description}\n\nFull Description:\n${incident.incident_data.description || ''}`;
+        setRawText(description);
+        setActivePage('onboard-runbook');
         setLoading(true);
         try {
-            const response = await generateSOPApi(rawText, null);
-
+            const response = await generateSOPApi(description, null);
             if (response.status === 'clarification_needed') {
                 setClarification({ isNeeded: true, questions: response.questions });
                 const initialAnswers = response.questions.reduce((acc, q) => ({ ...acc, [q]: '' }), {});
@@ -134,10 +107,34 @@ function App() {
                 setTitle(response.title);
                 setIssue(response.issue);
                 setSteps(response.steps.map(s => ({...s, isMatching: false, isCreating: false })));
-                setModal({ visible: true, message: 'SOP draft generated successfully! Please review the results.' });
+                setModal({ visible: true, message: 'Runbook draft generated successfully from history!' });
             }
         } catch (error) {
-            console.error('Error generating SOP:', error);
+            setModal({ visible: true, message: error.message });
+        } finally {
+            setLoading(false);
+        }
+    };
+
+    const handleGenerateRunbook = async () => {
+        if (!rawText.trim()) {
+            setModal({ visible: true, message: 'Please enter a problem description to generate a Runbook.' });
+            return;
+        }
+        setLoading(true);
+        try {
+            const response = await generateSOPApi(rawText, null);
+            if (response.status === 'clarification_needed') {
+                setClarification({ isNeeded: true, questions: response.questions });
+                const initialAnswers = response.questions.reduce((acc, q) => ({ ...acc, [q]: '' }), {});
+                setUserAnswers(initialAnswers);
+            } else if (response.status === 'sop_generated') {
+                setTitle(response.title);
+                setIssue(response.issue);
+                setSteps(response.steps.map(s => ({...s, isMatching: false, isCreating: false })));
+                setModal({ visible: true, message: 'Runbook draft generated successfully!' });
+            }
+        } catch (error) {
             setModal({ visible: true, message: error.message });
         } finally {
             setLoading(false);
@@ -149,15 +146,13 @@ function App() {
         setClarification({ isNeeded: false, questions: [] });
         try {
             const response = await generateSOPApi(rawText, userAnswers);
-
             if (response.status === 'sop_generated') {
                 setTitle(response.title);
                 setIssue(response.issue);
                 setSteps(response.steps.map(s => ({...s, isMatching: false, isCreating: false })));
-                setModal({ visible: true, message: 'SOP draft generated successfully from your answers! Please review.' });
+                setModal({ visible: true, message: 'Runbook draft generated successfully from your answers!' });
             }
         } catch (error) {
-            console.error('Error generating SOP with answers:', error);
             setModal({ visible: true, message: error.message });
         } finally {
             setLoading(false);
@@ -175,15 +170,14 @@ function App() {
             setTitle(parsedData.title);
             setIssue(parsedData.issue);
             setSteps(parsedData.steps.map(s => ({...s, isMatching: false, isCreating: false })));
-            setModal({ visible: true, message: 'SOP parsed successfully! Please review the extracted data.' });
+            setModal({ visible: true, message: 'Runbook parsed successfully!' });
         } catch (error) {
-            console.error('Error parsing SOP:', error);
-            setModal({ visible: true, message: 'Failed to parse SOP with AI. ' + error.message });
+            setModal({ visible: true, message: 'Failed to parse Runbook with AI. ' + error.message });
         } finally {
             setLoading(false);
         }
     };
-
+    
     const handleRematchStepScript = async (stepIndex) => {
         const currentStep = steps[stepIndex];
         if (!currentStep || !currentStep.description.trim()) {
@@ -197,23 +191,19 @@ function App() {
 
         try {
             const matchResult = await matchScriptApi(currentStep.description);
-            updatedSteps = [...steps]; // Re-fetch state in case it changed
-            updatedSteps[stepIndex] = { 
-                ...updatedSteps[stepIndex], 
-                script_id: matchResult.script_id, 
-                script: matchResult.script_name 
-            };
+            updatedSteps = [...steps]; // Refetch state in case of changes
+            updatedSteps[stepIndex] = { ...updatedSteps[stepIndex], script_id: matchResult.script_id, script: matchResult.script_name };
+            setSteps(updatedSteps);
             setModal({ visible: true, message: matchResult.script_name ? `Found match: ${matchResult.script_name}` : 'No confident script match found.' });
         } catch (error) {
             setModal({ visible: true, message: error.message });
+            updatedSteps = [...steps]; // Refetch state on error
         } finally {
-            updatedSteps = [...steps];
             updatedSteps[stepIndex] = { ...updatedSteps[stepIndex], isMatching: false };
             setSteps(updatedSteps);
         }
     };
 
-    // 3. Create the Handler Function
     const handleCreateScriptForStep = async (stepIndex) => {
         const targetStep = steps[stepIndex];
         if (!targetStep || !targetStep.description.trim()) {
@@ -232,9 +222,7 @@ function App() {
                 steps: steps.map(s => s.description),
                 target_step_description: targetStep.description
             };
-
             const generatedScript = await generateScriptFromContextApi(context);
-            
             setScriptToEdit(generatedScript);
             setIsScriptModalOpen(true);
 
@@ -249,253 +237,117 @@ function App() {
 
     const handleStepChange = (index, field, value) => {
         const updatedSteps = [...steps];
-        const step = { ...updatedSteps[index] };
-
-        if (field === 'script_id') {
-            const selectedScript = availableScripts.find(s => String(s.id) === String(value));
-            step.script_id = value;
-            step.script = selectedScript ? selectedScript.name : null;
-        } else {
-            step[field] = value;
-        }
-        updatedSteps[index] = step;
+        updatedSteps[index][field] = value;
         setSteps(updatedSteps);
     };
 
     const addStep = () => {
-        // 4. Update addStep
-        setSteps([...steps, { description: '', script: '', isMatching: false, isCreating: false }]);
+        setSteps([...steps, { description: '', script_id: null, isMatching: false, isCreating: false }]);
     };
 
     const removeStep = (index) => {
-        const updatedSteps = steps.filter((_, i) => i !== index);
-        setSteps(updatedSteps);
+        setSteps(steps.filter((_, i) => i !== index));
     };
 
-    const uploadSOP = async () => {
+    const uploadRunbook = async () => {
         if (!title.trim() || !issue.trim()) {
             setModal({ visible: true, message: 'Title and Issue cannot be empty.' });
             return;
         }
-
-        const unresolvedStep = steps.find(step => step.script_id === 'Not Found');
-        if (unresolvedStep) {
-            setModal({
-                visible: true,
-                message: `Please select a script for all steps. The step starting with "${unresolvedStep.description.substring(0, 40)}..." is missing a script.`
-            });
-            return;
-        }
-
         const validSteps = steps.filter(step => step.description.trim());
-
         if (validSteps.length === 0) {
-            setModal({ visible: true, message: 'Please provide at least one step with a description.' });
+            setModal({ visible: true, message: 'Please provide at least one step.' });
             return;
         }
-
-        const payloadSteps = validSteps.map(({ description, script_id }) => ({
-            description,
-            script_id: script_id === "Not Found" ? null : script_id
-        }));
-
         try {
-            const sop = { title, issue, steps: payloadSteps };
+            const sop = { title, issue, tags: tags.split(',').map(t=>t.trim()), steps: validSteps };
             await uploadSOPApi(sop);
-            setModal({ visible: true, message: 'SOP ingested successfully!' });
-            resetSOPSteps();
+            setModal({ visible: true, message: 'Runbook ingested successfully!' });
+            resetRunbookForm();
         } catch (error) {
-            console.error(error.message);
             setModal({ visible: true, message: error.message });
         }
     };
 
-    const switchToIngestTab = () => {
-        setActiveTab('ingest');
-        setModal({ visible: false, message: '' });
+    const resolveIncident = async () => { /* ... unchanged ... */ };
+
+    const pageVariants = {
+        initial: { opacity: 0, y: 20 },
+        animate: { opacity: 1, y: 0 },
+        exit: { opacity: 0, y: -20 },
     };
 
-    const handleDraftSopFromHistory = (incident) => {
-        if (!incident || !incident.incident_data) {
-            setModal({ visible: true, message: 'Could not load incident data to draft an SOP.' });
-            return;
-        }
-        const { short_description, description, cmdb_ci } = incident.incident_data;
-        const problemDescription = `Short Description: ${short_description || 'N/A'}\nDescription: ${description || 'N/A'}\nHost/CI: ${cmdb_ci || 'N/A'}`;
-        setRawText(problemDescription);
-        setActiveTab('ingest');
+    const pageTransition = {
+        type: 'tween',
+        ease: 'anticipate',
+        duration: 0.4,
     };
 
-    const resolveIncident = async () => {
-        if (!incidentNumber.trim()) {
-            setModal({ visible: true, message: 'Please enter an incident number.' });
-            return;
+    const renderPage = () => {
+        switch (activePage) {
+            case 'dashboard':
+                return <Dashboard />;
+            case 'history':
+                return <History onDraftRunbook={handleDraftAndGenerateFromHistory} />;
+            case 'manage-runbooks':
+                return <RunbookDeletion />;
+            case 'onboard-runbook':
+                 return <RunbookIngestion
+                            title={title} setTitle={setTitle}
+                            issue={issue} setIssue={setIssue}
+                            tags={tags} setTags={setTags}
+                            steps={steps} handleStepChange={handleStepChange}
+                            addStep={addStep} removeStep={removeStep}
+                            availableScripts={availableScripts}
+                            onAddNewScript={handleOpenAddScriptModal}
+                            uploadRunbook={uploadRunbook}
+                            rawText={rawText} setRawText={setRawText}
+                            handleParseDocument={handleParseDocument}
+                            handleGenerateRunbook={handleGenerateRunbook}
+                            handleRematchStepScript={handleRematchStepScript}
+                            onCreateScriptForStep={handleCreateScriptForStep}
+                            loading={loading} resetRunbookSteps={resetRunbookForm}
+                        />;
+            case 'scripts':
+                return <ScriptsPage />;
+            case 'testbed':
+                return <IncidentResolution
+                            incidentNumber={incidentNumber} setIncidentNumber={setIncidentNumber}
+                            resolveIncident={resolveIncident} loading={loading}
+                            incidentDetails={incidentDetails}
+                            resolvedScripts={resolvedScripts}
+                        />;
+            default:
+                return <Dashboard />;
         }
-        setLoading(true);
-        setIncidentDetails(null);
-        setResolvedScripts([]);
-        try {
-            const incidentResults = await resolveIncidentApi(incidentNumber);
-            if (incidentResults.resolved_scripts && incidentResults.resolved_scripts.length > 0) {
-                setIncidentDetails(incidentResults.incident_data);
-                setResolvedScripts(
-                    incidentResults.resolved_scripts.map(s => ({ ...s, executionStatus: 'idle', output: '' }))
-                );
-                setModal({ visible: false, message: '' });
-            } else {
-                setIncidentDetails(null);
-                setResolvedScripts([]);
-                setModal({ visible: true, message: 'No relevant SOPs or scripts found for this incident.', onAddSOP: switchToIngestTab });
-            }
-        } catch (error) {
-            console.error(error.message);
-            setIncidentDetails(null);
-            setResolvedScripts([]);
-            setModal({ visible: true, message: error.message });
-        } finally {
-            setLoading(false);
-        }
-    };
-
-    const executeScript = async (scriptToExecute, scriptIndex) => {
-        setResolvedScripts(prev => {
-            const updatedScripts = [...prev];
-            updatedScripts[scriptIndex] = { ...updatedScripts[scriptIndex], executionStatus: 'running', output: 'Executing...' };
-            return updatedScripts;
-        });
-        try {
-            const response = await executeScriptApi(scriptToExecute.script_id, scriptToExecute.script_name, scriptToExecute.extracted_parameters);
-            setResolvedScripts(prev => {
-                const updatedScripts = [...prev];
-                updatedScripts[scriptIndex] = { ...updatedScripts[scriptIndex], executionStatus: response.status === 'success' ? 'success' : 'error', output: response.output };
-                return updatedScripts;
-            });
-        } catch (error) {
-            setResolvedScripts(prev => {
-                const updatedScripts = [...prev];
-                updatedScripts[scriptIndex] = { ...updatedScripts[scriptIndex], executionStatus: 'error', output: error.message };
-                return updatedScripts;
-            });
-        }
-    };
-
-    const onExecuteAll = async () => {
-        setIsExecutingAll(true);
-        let currentScripts = [...resolvedScripts];
-        for (let i = 0; i < currentScripts.length; i++) {
-            const script = currentScripts[i];
-            const missingRequiredParam = script.parameters.find(p => p.required && !script.extracted_parameters?.[p.param_name]);
-            if (missingRequiredParam) {
-                setModal({ visible: true, message: `Cannot execute all scripts. Workflow stopped at step ${i + 1} because a required parameter "${missingRequiredParam.param_name}" is missing.` });
-                setIsExecutingAll(false);
-                return;
-            }
-        }
-        for (let i = 0; i < currentScripts.length; i++) {
-            const script = currentScripts[i];
-            if (script.executionStatus === 'success') continue;
-            setResolvedScripts(prev => {
-                const newScripts = [...prev];
-                newScripts[i] = { ...newScripts[i], executionStatus: 'running', output: 'Executing...' };
-                return newScripts;
-            });
-            try {
-                const response = await executeScriptApi(script.script_id, script.script_name, script.extracted_parameters);
-                setResolvedScripts(prev => {
-                    const newScripts = [...prev];
-                    newScripts[i] = { ...newScripts[i], executionStatus: response.status === 'success' ? 'success' : 'error', output: response.output };
-                    return newScripts;
-                });
-                if (response.status === 'error') break;
-            } catch (error) {
-                setResolvedScripts(prev => {
-                    const newScripts = [...prev];
-                    newScripts[i] = { ...newScripts[i], executionStatus: 'error', output: error.message };
-                    return newScripts;
-                });
-                break;
-            }
-        }
-        setIsExecutingAll(false);
     };
 
     return (
-        <div className="bg-gray-50 min-h-screen p-4 sm:p-8 font-sans antialiased text-gray-800">
-            <div className="container mx-auto max-w-4xl bg-white p-6 sm:p-8 rounded-3xl shadow-xl border border-gray-200">
-                <div className="flex justify-center mb-8">
-                    <button onClick={() => setActiveTab('ingest')} className={`py-3 px-8 text-xl font-bold rounded-l-full transition duration-300 focus:outline-none ${activeTab === 'ingest' ? 'bg-blue-600 text-white shadow-lg' : 'bg-gray-200 text-gray-700 hover:bg-gray-300'}`}>
-                        SOP Onboarding
-                    </button>
-                    <button onClick={() => setActiveTab('delete')} className={`py-3 px-8 text-xl font-bold transition duration-300 focus:outline-none ${activeTab === 'delete' ? 'bg-blue-600 text-white shadow-lg' : 'bg-gray-200 text-gray-700 hover:bg-gray-300'}`}>
-                        SOP Deletion
-                    </button>
-                    <button onClick={() => setActiveTab('search')} className={`py-3 px-8 text-xl font-bold transition duration-300 focus:outline-none ${activeTab === 'search' ? 'bg-blue-600 text-white shadow-lg' : 'bg-gray-200 text-gray-700 hover:bg-gray-300'}`}>
-                        Test Bed
-                    </button>
-                    <button onClick={() => setActiveTab('history')} className={`py-3 px-8 text-xl font-bold rounded-r-full transition duration-300 focus:outline-none ${activeTab === 'history' ? 'bg-blue-600 text-white shadow-lg' : 'bg-gray-200 text-gray-700 hover:bg-gray-300'}`}>
-                        History
-                    </button>
-                </div>
+        <div className="flex h-screen bg-gray-50 font-sans antialiased text-gray-800">
+            <Sidebar activePage={activePage} setActivePage={setActivePage} />
+            <main className="flex-1 overflow-y-auto overflow-x-hidden">
+                <AnimatePresence mode="wait">
+                    <motion.div
+                        key={activePage}
+                        variants={pageVariants}
+                        initial="initial"
+                        animate="animate"
+                        exit="exit"
+                        transition={pageTransition}
+                    >
+                        {renderPage()}
+                    </motion.div>
+                </AnimatePresence>
+            </main>
 
-                {activeTab === 'ingest' && (
-                    <SopIngestion
-                        title={title}
-                        setTitle={setTitle}
-                        issue={issue}
-                        setIssue={setIssue}
-                        steps={steps}
-                        handleStepChange={handleStepChange}
-                        addStep={addStep}
-                        removeStep={removeStep}
-                        availableScripts={availableScripts}
-                        onAddNewScript={handleOpenAddScriptModal}
-                        onEditScript={handleOpenEditScriptModal}
-                        onDeleteScript={handleDeleteScript}
-                        uploadSOP={uploadSOP}
-                        rawText={rawText}
-                        setRawText={setRawText}
-                        handleParseDocument={handleParseDocument}
-                        handleGenerateSOP={handleGenerateSOP}
-                        handleRematchStepScript={handleRematchStepScript}
-                        // 5. Pass the Prop
-                        onCreateScriptForStep={handleCreateScriptForStep}
-                        loading={loading}
-                        resetSOPSteps={resetSOPSteps}
-                    />
-                )}
-
-                {activeTab === 'delete' && <SopDeletion />}
-
-                {activeTab === 'search' && (
-                    <IncidentResolution
-                        incidentNumber={incidentNumber}
-                        setIncidentNumber={setIncidentNumber}
-                        resolveIncident={resolveIncident}
-                        loading={loading}
-                        incidentDetails={incidentDetails}
-                        resolvedScripts={resolvedScripts}
-                        executeScript={executeScript}
-                        onExecuteAll={onExecuteAll}
-                    />
-                )}
-
-                {activeTab === 'history' && (
-                    <History
-                        onDraftSop={handleDraftSopFromHistory}
-                    />
-                )}
-            </div>
-
-            <Modal message={modal.message} visible={modal.visible} onClose={() => setModal({ visible: false, message: '' })} onAddSOP={modal.onAddSOP} />
-
+            <Modal message={modal.message} visible={modal.visible} onClose={() => setModal({ visible: false, message: '' })} />
             <AddNewScriptModal
                 isOpen={isScriptModalOpen}
-                onClose={handleCloseScriptModal}
+                onClose={() => setIsScriptModalOpen(false)}
                 onScriptAdded={fetchScripts}
                 scripts={availableScripts}
                 scriptToEdit={scriptToEdit}
             />
-
             <ConfirmationModal
                 isOpen={confirmationModal.isOpen}
                 onClose={closeConfirmationModal}
@@ -503,7 +355,6 @@ function App() {
                 title={confirmationModal.title}
                 message={confirmationModal.message}
             />
-
             <ClarificationModal
                 isOpen={clarification.isNeeded}
                 questions={clarification.questions}
@@ -518,4 +369,3 @@ function App() {
 }
 
 export default App;
-

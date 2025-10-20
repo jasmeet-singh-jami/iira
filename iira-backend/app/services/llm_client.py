@@ -354,7 +354,7 @@ def generate_script_from_context_llm(sop_context: Dict) -> Dict:
     prompt = f"""
     You are an expert DevOps engineer and a master scriptwriter. Your task is to author a complete, production-ready shell script based on the context of a Standard Operating Procedure (SOP) and a specific step.
 
-    Your output MUST be a single, valid JSON object with no other text or explanations.
+    Your output MUST be a single, valid JSON object with no other text or explanations. This step is an absolute must.
 
     **Full SOP Context:**
     - **Title:** {title}

@@ -46,14 +46,22 @@ from typing import List, Dict, Optional, Any
 from contextlib import asynccontextmanager
 import asyncio
 import logging
+import datetime
 
 # Configure logger
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
 logger = logging.getLogger(__name__)
 
+agent_status = {
+    "status": "initializing",
+    "current_incident": None,
+    "last_checked": None
+}
+
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     logger.info("🚀 Application starting up. Performing initial script sync to Qdrant...")
+    agent_status["status"] = "initializing"
     await asyncio.to_thread(sync_scripts_to_qdrant)
     logger.info("✅ Initial script sync complete.")
 
@@ -65,6 +73,7 @@ async def lifespan(app: FastAPI):
         await monitor_task
     except asyncio.CancelledError:
         logger.info("🛑 Background incident monitor stopped.")
+        agent_status["status"] = "stopped"
 
 app = FastAPI(lifespan=lifespan)
 
@@ -141,6 +150,9 @@ async def monitor_new_incidents():
     while True:
         try:
             logger.info("⏱️  [Monitor] Checking for new unresolved incidents...")
+            agent_status["status"] = "monitoring"
+            agent_status["current_incident"] = None
+            agent_status["last_checked"] = datetime.datetime.utcnow().isoformat()
             new_incidents = await asyncio.to_thread(get_new_unresolved_incidents)
 
             if new_incidents:
@@ -148,6 +160,8 @@ async def monitor_new_incidents():
 
                 for incident_number, incident_data in new_incidents.items():
                     logger.info(f"--- Processing Incident: {incident_number} ---")
+                    agent_status["status"] = "resolving"
+                    agent_status["current_incident"] = incident_number
                     
                     try:
                         incident_id = incident_data["id"]
@@ -178,12 +192,18 @@ async def monitor_new_incidents():
             else:
                 logger.info("...no new incidents found.")
             
+            agent_status["status"] = "idle"
+            agent_status["current_incident"] = None
             await asyncio.sleep(60)
             
         except Exception as e:
             logger.critical(f"🔥  [Monitor] Critical error in main loop: {e}", exc_info=True)
+            agent_status["status"] = "error"
             await asyncio.sleep(60)
-# --- END REFACTOR ---
+
+@app.get("/agent/status", summary="Get the current status of the background agent")
+def get_agent_status():
+    return JSONResponse(content=agent_status)
 
 @app.post("/ingest")
 def ingest_sop(request: IngestRequest):

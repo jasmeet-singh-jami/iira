@@ -234,3 +234,13 @@ export const generateScriptFromContextApi = async (context) => {
         throw new Error(errorMessage);
     }
 };
+
+export const fetchAgentStatusApi = async () => {
+    try {
+        const response = await axios.get(`${API_BASE}/api/agent/status`);
+        return response.data;
+    } catch (error) {
+        console.error("API Error: Error fetching agent status:", error);
+        throw new Error('Failed to fetch agent status.');
+    }
+};

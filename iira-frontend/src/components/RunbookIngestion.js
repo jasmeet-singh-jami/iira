@@ -1,9 +1,9 @@
-import React, { useState } from 'react';
-// --- MODIFICATION: Import Sparkles icon for the new button ---
-import { Plus, X, ChevronDown, Wand2, RefreshCcw, Loader2, Pencil, Trash2, Search, BrainCircuit, Sparkles } from 'lucide-react';
+// src/components/RunbookIngestion.js
+import React from 'react';
+import { Plus, X, Search, BrainCircuit, Sparkles, Wand2, RefreshCcw, Loader2 } from 'lucide-react';
 import SearchableDropdown from './SearchableDropdown';
 
-const SopIngestion = ({
+const RunbookIngestion = ({
     title,
     setTitle,
     issue,
@@ -16,65 +16,53 @@ const SopIngestion = ({
     removeStep,
     availableScripts,
     onAddNewScript,
-    onEditScript,
-    onDeleteScript,
-    uploadSOP,
+    uploadRunbook,
     rawText,
     setRawText,
     handleParseDocument,
-    handleGenerateSOP,
+    handleGenerateRunbook,
     handleRematchStepScript,
-    // --- NEW: Receive the AI script creation handler ---
     onCreateScriptForStep,
-    // --- END NEW ---
     loading,
-    resetSOPSteps
+    resetRunbookSteps
 }) => {
-    const [scriptIdToEdit, setScriptIdToEdit] = useState('');
-
-    const handleEditScript = () => {
-        if (!scriptIdToEdit) return;
-        const script = availableScripts.find(s => String(s.id) === String(scriptIdToEdit));
-        if (script) {
-            onEditScript(script);
-        }
-    };
-    
-    const handleDeleteScript = () => {
-        if (!scriptIdToEdit) return;
-        const script = availableScripts.find(s => String(s.id) === String(scriptIdToEdit));
-        if (script) {
-            onDeleteScript(script);
-        }
-    };
 
     return (
-        <div>
-            <h2 className="text-3xl sm:text-4xl font-extrabold text-blue-800 mb-6 border-b-2 pb-2 border-blue-100">
-                SOP Onboarding
-            </h2>
+        <div className="p-8">
+            <div className="flex items-center justify-between pb-4 border-b border-gray-200 mb-8">
+                <div>
+                    <h1 className="text-4xl font-extrabold text-gray-800">Onboard New Runbook</h1>
+                    <p className="mt-1 text-gray-500">Create a new automated workflow using AI or by parsing an existing document.</p>
+                </div>
+                 <button
+                    onClick={resetRunbookSteps}
+                    className="flex items-center px-4 py-2 bg-gray-200 text-gray-700 font-semibold rounded-lg shadow-md hover:bg-gray-300 transition duration-300"
+                >
+                    <RefreshCcw size={16} className="mr-2" /> Reset Form
+                </button>
+            </div>
 
             <div className="bg-blue-50 p-6 rounded-xl border border-blue-200 mb-6 shadow-inner">
                 <h3 className="text-xl font-bold text-blue-700 mb-3 flex items-center">
-                    <Wand2 className="h-6 w-6 mr-2" /> AI-Powered SOP Onboarding
+                    <Wand2 className="h-6 w-6 mr-2" /> AI-Powered Runbook Onboarding
                 </h3>
                 <p className="text-sm text-gray-600 mb-4">
-                    Enter a problem description to generate a new SOP, or paste an existing document to parse it.
+                    Enter a problem description to generate a new Runbook, or paste an existing document to parse it.
                 </p>
                 <textarea
-                    placeholder="Describe the problem you want to solve (e.g., 'A web server is down and needs to be restarted') OR paste in a full, pre-written SOP document..."
+                    placeholder="Describe the problem you want to solve (e.g., 'A web server is down and needs to be restarted') OR paste in a full, pre-written Runbook document..."
                     value={rawText}
                     onChange={e => setRawText(e.target.value)}
                     className="w-full px-4 py-3 border border-gray-300 rounded-lg resize-y h-40 focus:outline-none focus:ring-2 focus:ring-blue-500 transition duration-200 text-sm"
                 />
                 <div className="flex justify-end space-x-2 mt-4">
                     <button
-                        onClick={handleGenerateSOP}
+                        onClick={handleGenerateRunbook}
                         disabled={loading}
                         className={`flex items-center px-6 py-3 rounded-lg font-semibold transition-all duration-300 ${loading ? 'bg-purple-300 cursor-not-allowed' : 'bg-purple-600 text-white shadow-lg hover:bg-purple-700'}`}
                     >
                         {loading ? <Loader2 size={20} className="animate-spin mr-2" /> : <BrainCircuit size={20} className="mr-2" />}
-                        {loading ? 'Drafting...' : 'Draft SOP with AI'}
+                        {loading ? 'Drafting...' : 'Draft Runbook with AI'}
                     </button>
                     <button
                         onClick={handleParseDocument}
@@ -82,24 +70,15 @@ const SopIngestion = ({
                         className={`flex items-center px-6 py-3 rounded-lg font-semibold transition-all duration-300 ${loading ? 'bg-blue-300 cursor-not-allowed' : 'bg-blue-600 text-white shadow-lg hover:bg-blue-700'}`}
                     >
                         {loading ? <Loader2 size={20} className="animate-spin mr-2" /> : <Wand2 size={20} className="mr-2" />}
-                        {loading ? 'Parsing...' : 'Parse Existing SOP'}
+                        {loading ? 'Parsing...' : 'Parse Existing Runbook'}
                     </button>
                 </div>
-            </div>
-            
-            <div className="flex justify-end mb-4">
-                <button
-                    onClick={resetSOPSteps}
-                    className="flex items-center px-4 py-2 bg-gray-200 text-gray-700 rounded-lg shadow-md hover:bg-gray-300 transition duration-300"
-                >
-                    <RefreshCcw size={16} className="mr-2" /> Reset Form
-                </button>
             </div>
 
             <div className="space-y-4">
                 <input
                     type="text"
-                    placeholder="SOP Title"
+                    placeholder="Runbook Title"
                     value={title}
                     onChange={e => setTitle(e.target.value)}
                     className="w-full px-4 py-3 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 transition duration-200"
@@ -118,7 +97,6 @@ const SopIngestion = ({
                     className="w-full px-4 py-3 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 transition duration-200"
                 />
             </div>
-
 
             <div className="space-y-6 mt-6">
                 <h3 className="text-2xl font-bold text-gray-800 border-b pb-2">Steps</h3>
@@ -142,7 +120,6 @@ const SopIngestion = ({
                                 >
                                     {step.isMatching ? <Loader2 size={20} className="animate-spin" /> : <Search size={20} />}
                                 </button>
-                                {/* --- NEW: "Create Script with AI" Button --- */}
                                 <button
                                     onClick={() => onCreateScriptForStep(index)}
                                     disabled={step.isMatching || step.isCreating}
@@ -151,7 +128,6 @@ const SopIngestion = ({
                                 >
                                     {step.isCreating ? <Loader2 size={20} className="animate-spin" /> : <Sparkles size={20} />}
                                 </button>
-                                {/* --- END NEW --- */}
                             </div>
                             <div className="relative flex items-center space-x-2">
                                 <div className="relative flex-grow">
@@ -170,40 +146,15 @@ const SopIngestion = ({
                         {steps.length > 1 && (<button onClick={() => removeStep(index)} className="p-2 bg-red-100 text-red-600 rounded-full shadow-md hover:bg-red-200 transition duration-200" ><X size={20} /></button>)}
                     </div>
                 ))}
-                <div className="flex items-center space-x-4 mt-4 pt-4 border-t">
-                    <button onClick={addStep} className="flex items-center px-4 py-2 bg-green-500 text-white font-semibold rounded-lg shadow-md hover:bg-green-600 transition duration-300" >
-                        <Plus size={20} className="mr-2" /> Add Step
-                    </button>
-                    
-                    <div className="flex items-center space-x-2 border-l pl-4 w-full md:w-2/3">
-                        <SearchableDropdown
-                            options={availableScripts}
-                            value={scriptIdToEdit}
-                            onChange={setScriptIdToEdit}
-                            placeholder="Select script to manage..."
-                        />
-                        <button
-                            onClick={handleEditScript}
-                            disabled={!scriptIdToEdit}
-                            className="flex items-center px-4 py-2 bg-yellow-500 text-white font-semibold rounded-lg shadow-md hover:bg-yellow-600 transition duration-300 disabled:bg-gray-300 disabled:cursor-not-allowed whitespace-nowrap"
-                        >
-                            <Pencil size={18} className="mr-2" /> Edit
-                        </button>
-                        <button
-                            onClick={handleDeleteScript}
-                            disabled={!scriptIdToEdit}
-                            className="flex items-center px-4 py-2 bg-red-600 text-white font-semibold rounded-lg shadow-md hover:bg-red-700 transition duration-300 disabled:bg-gray-300 disabled:cursor-not-allowed whitespace-nowrap"
-                        >
-                            <Trash2 size={18} className="mr-2" /> Delete
-                        </button>
-                    </div>
-                </div>
+                <button onClick={addStep} className="flex items-center px-4 py-2 bg-green-500 text-white font-semibold rounded-lg shadow-md hover:bg-green-600 transition duration-300 mt-4" >
+                    <Plus size={20} className="mr-2" /> Add Step
+                </button>
             </div>
-            <button onClick={uploadSOP} className="w-full sm:w-auto mt-6 px-8 py-3 bg-blue-600 text-white font-bold rounded-lg shadow-lg hover:bg-blue-700 transition duration-300" >
-                Upload SOP
+            <button onClick={uploadRunbook} className="w-full sm:w-auto mt-6 px-8 py-3 bg-blue-600 text-white font-bold rounded-lg shadow-lg hover:bg-blue-700 transition duration-300" >
+                Upload Runbook
             </button>
         </div>
     );
 };
 
-export default SopIngestion;
+export default RunbookIngestion;
