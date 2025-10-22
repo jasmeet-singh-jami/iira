@@ -21,7 +21,8 @@ import {
     matchScriptApi,
     generateSOPApi,
     generateScriptFromContextApi,
-    parseSOPApi
+    parseSOPApi,
+    executeScriptApi
 } from './services/apis';
 
 function App() {
@@ -41,7 +42,9 @@ function App() {
 
     // Global state
     const [availableScripts, setAvailableScripts] = useState([]);
-    const [loading, setLoading] = useState(false);
+    const [incidentLoading, setIncidentLoading] = useState(false);
+    const [isGenerating, setIsGenerating] = useState(false);
+    const [isParsing, setIsParsing] = useState(false);
     const [modal, setModal] = useState({ visible: false, message: '' });
     const [isScriptModalOpen, setIsScriptModalOpen] = useState(false);
     const [scriptToEdit, setScriptToEdit] = useState(null);
@@ -96,7 +99,7 @@ function App() {
         const description = `Incident ${incident.incident_number}: ${incident.incident_data.short_description}\n\nFull Description:\n${incident.incident_data.description || ''}`;
         setRawText(description);
         setActivePage('onboard-runbook');
-        setLoading(true);
+        setIsGenerating(true);
         try {
             const response = await generateSOPApi(description, null);
             if (response.status === 'clarification_needed') {
@@ -112,7 +115,7 @@ function App() {
         } catch (error) {
             setModal({ visible: true, message: error.message });
         } finally {
-            setLoading(false);
+            setIsGenerating(false);
         }
     };
 
@@ -121,7 +124,7 @@ function App() {
             setModal({ visible: true, message: 'Please enter a problem description to generate a Runbook.' });
             return;
         }
-        setLoading(true);
+        setIsGenerating(true);
         try {
             const response = await generateSOPApi(rawText, null);
             if (response.status === 'clarification_needed') {
@@ -137,12 +140,12 @@ function App() {
         } catch (error) {
             setModal({ visible: true, message: error.message });
         } finally {
-            setLoading(false);
+            setIsGenerating(false);
         }
     };
 
     const handleAnswerSubmission = async () => {
-        setLoading(true);
+        setIsGenerating(true);
         setClarification({ isNeeded: false, questions: [] });
         try {
             const response = await generateSOPApi(rawText, userAnswers);
@@ -155,7 +158,7 @@ function App() {
         } catch (error) {
             setModal({ visible: true, message: error.message });
         } finally {
-            setLoading(false);
+            setIsGenerating(false);
         }
     };
 
@@ -164,7 +167,7 @@ function App() {
             setModal({ visible: true, message: 'Please paste some text to parse.' });
             return;
         }
-        setLoading(true);
+        setIsParsing(true);
         try {
             const parsedData = await parseSOPApi(rawText);
             setTitle(parsedData.title);
@@ -174,7 +177,7 @@ function App() {
         } catch (error) {
             setModal({ visible: true, message: 'Failed to parse Runbook with AI. ' + error.message });
         } finally {
-            setLoading(false);
+            setIsParsing(false);
         }
     };
     
@@ -185,22 +188,20 @@ function App() {
             return;
         }
 
-        let updatedSteps = [...steps];
-        updatedSteps[stepIndex] = { ...updatedSteps[stepIndex], isMatching: true };
-        setSteps(updatedSteps);
+        setSteps(currentSteps => currentSteps.map((step, idx) => idx === stepIndex ? { ...step, isMatching: true } : step));
 
         try {
             const matchResult = await matchScriptApi(currentStep.description);
-            updatedSteps = [...steps]; // Refetch state in case of changes
-            updatedSteps[stepIndex] = { ...updatedSteps[stepIndex], script_id: matchResult.script_id, script: matchResult.script_name };
-            setSteps(updatedSteps);
+            setSteps(currentSteps => currentSteps.map((step, idx) => {
+                if (idx === stepIndex) {
+                    return { ...step, script_id: matchResult.script_id, script: matchResult.script_name, isMatching: false };
+                }
+                return step;
+            }));
             setModal({ visible: true, message: matchResult.script_name ? `Found match: ${matchResult.script_name}` : 'No confident script match found.' });
         } catch (error) {
             setModal({ visible: true, message: error.message });
-            updatedSteps = [...steps]; // Refetch state on error
-        } finally {
-            updatedSteps[stepIndex] = { ...updatedSteps[stepIndex], isMatching: false };
-            setSteps(updatedSteps);
+             setSteps(currentSteps => currentSteps.map((step, idx) => idx === stepIndex ? { ...step, isMatching: false } : step));
         }
     };
 
@@ -211,9 +212,7 @@ function App() {
             return;
         }
 
-        let updatedSteps = [...steps];
-        updatedSteps[stepIndex] = { ...updatedSteps[stepIndex], isCreating: true };
-        setSteps(updatedSteps);
+        setSteps(currentSteps => currentSteps.map((step, idx) => idx === stepIndex ? { ...step, isCreating: true } : step));
 
         try {
             const context = {
@@ -229,24 +228,12 @@ function App() {
         } catch (error) {
             setModal({ visible: true, message: error.message });
         } finally {
-            updatedSteps = [...steps];
-            updatedSteps[stepIndex] = { ...updatedSteps[stepIndex], isCreating: false };
-            setSteps(updatedSteps);
+            setSteps(currentSteps => currentSteps.map((step, idx) => idx === stepIndex ? { ...step, isCreating: false } : step));
         }
     };
-
-    const handleStepChange = (index, field, value) => {
-        const updatedSteps = [...steps];
-        updatedSteps[index][field] = value;
-        setSteps(updatedSteps);
-    };
-
-    const addStep = () => {
-        setSteps([...steps, { description: '', script_id: null, isMatching: false, isCreating: false }]);
-    };
-
-    const removeStep = (index) => {
-        setSteps(steps.filter((_, i) => i !== index));
+    
+    const onStepsChange = (newSteps) => {
+        setSteps(newSteps);
     };
 
     const uploadRunbook = async () => {
@@ -269,7 +256,60 @@ function App() {
         }
     };
 
-    const resolveIncident = async () => { /* ... unchanged ... */ };
+    const resolveIncident = async () => {
+        if (!incidentNumber.trim()) {
+            setModal({ visible: true, message: 'Please enter an incident number.' });
+            return;
+        }
+        setIncidentLoading(true);
+        setResolvedScripts([]);
+        try {
+            const data = await resolveIncidentApi(incidentNumber);
+            setIncidentDetails(data.incident_data);
+            setResolvedScripts(data.resolved_scripts);
+        } catch (error) {
+            setModal({ visible: true, message: error.message });
+            setIncidentDetails(null);
+        } finally {
+            setIncidentLoading(false);
+        }
+    };
+
+    const executeScript = async (scriptToExecute, scriptIndex) => {
+        setResolvedScripts(currentScripts =>
+            currentScripts.map((script, index) =>
+                index === scriptIndex ? { ...script, executionStatus: 'running' } : script
+            )
+        );
+
+        try {
+            const result = await executeScriptApi(
+                scriptToExecute.script_id,
+                scriptToExecute.script_name,
+                scriptToExecute.extracted_parameters
+            );
+            setResolvedScripts(currentScripts =>
+                currentScripts.map((script, index) =>
+                    index === scriptIndex ? { ...script, executionStatus: result.status, output: result.output } : script
+                )
+            );
+        } catch (error) {
+            setResolvedScripts(currentScripts =>
+                currentScripts.map((script, index) =>
+                    index === scriptIndex ? { ...script, executionStatus: 'error', output: error.message } : script
+                )
+            );
+        }
+    };
+    
+    const onExecuteAll = async () => {
+        for (let i = 0; i < resolvedScripts.length; i++) {
+            const step = resolvedScripts[i];
+            if (step.script_id && step.script_id !== 'Not Found' && step.executionStatus !== 'success') {
+                 await executeScript(step, i);
+            }
+        }
+    };
 
     const pageVariants = {
         initial: { opacity: 0, y: 20 },
@@ -296,8 +336,8 @@ function App() {
                             title={title} setTitle={setTitle}
                             issue={issue} setIssue={setIssue}
                             tags={tags} setTags={setTags}
-                            steps={steps} handleStepChange={handleStepChange}
-                            addStep={addStep} removeStep={removeStep}
+                            steps={steps}
+                            onStepsChange={onStepsChange}
                             availableScripts={availableScripts}
                             onAddNewScript={handleOpenAddScriptModal}
                             uploadRunbook={uploadRunbook}
@@ -306,16 +346,20 @@ function App() {
                             handleGenerateRunbook={handleGenerateRunbook}
                             handleRematchStepScript={handleRematchStepScript}
                             onCreateScriptForStep={handleCreateScriptForStep}
-                            loading={loading} resetRunbookSteps={resetRunbookForm}
+                            isGenerating={isGenerating}
+                            isParsing={isParsing}
+                            resetRunbookSteps={resetRunbookForm}
                         />;
             case 'scripts':
                 return <ScriptsPage />;
             case 'testbed':
                 return <IncidentResolution
                             incidentNumber={incidentNumber} setIncidentNumber={setIncidentNumber}
-                            resolveIncident={resolveIncident} loading={loading}
+                            resolveIncident={resolveIncident} loading={incidentLoading}
                             incidentDetails={incidentDetails}
                             resolvedScripts={resolvedScripts}
+                            executeScript={executeScript}
+                            onExecuteAll={onExecuteAll}
                         />;
             default:
                 return <Dashboard />;
@@ -362,7 +406,7 @@ function App() {
                 setAnswers={setUserAnswers}
                 onSubmit={handleAnswerSubmission}
                 onClose={() => setClarification({ isNeeded: false, questions: [] })}
-                loading={loading}
+                loading={isGenerating}
             />
         </div>
     );

@@ -1,12 +1,11 @@
 // src/components/AddNewScriptModal.js
 import React, { useState, useEffect } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
-import { Plus, X, Save, ChevronDown } from 'lucide-react';
-import Modal from './Modal'; // Assuming a simple modal component
-import { saveScriptApi, updateScriptApi } from '../services/apis';
+import { Plus, X, Save, ChevronDown, Sparkles, Loader2 } from 'lucide-react';
+import Modal from './Modal';
+import { saveScriptApi, updateScriptApi, generateScriptSimpleApi } from '../services/apis';
 
 const AddNewScriptModal = ({ isOpen, onClose, onScriptAdded, scripts, scriptToEdit }) => {
-    // This logic is now correct for determining the mode.
     const isEditMode = Boolean(scriptToEdit && scriptToEdit.id);
 
     const [name, setName] = useState('');
@@ -16,6 +15,7 @@ const AddNewScriptModal = ({ isOpen, onClose, onScriptAdded, scripts, scriptToEd
     const [scriptType, setScriptType] = useState('shell_script');
     const [params, setParams] = useState([{ param_name: '', param_type: 'string', required: true, default_value: '' }]);
     const [modalMessage, setModalMessage] = useState({ visible: false, message: '' });
+    const [isGenerating, setIsGenerating] = useState(false);
 
     useEffect(() => {
         if (isOpen) {
@@ -37,6 +37,25 @@ const AddNewScriptModal = ({ isOpen, onClose, onScriptAdded, scripts, scriptToEd
             }
         }
     }, [isOpen, scriptToEdit]);
+
+    const handleGenerateScript = async () => {
+        if (!description.trim()) {
+            setModalMessage({ visible: true, message: 'Please provide a description to generate a script with AI.' });
+            return;
+        }
+        setIsGenerating(true);
+        try {
+            const generatedScript = await generateScriptSimpleApi(description);
+            setName(generatedScript.name || '');
+            setContent(generatedScript.content || '');
+            setParams(generatedScript.params && generatedScript.params.length > 0 ? generatedScript.params : [{ param_name: '', param_type: 'string', required: true, default_value: '' }]);
+            setModalMessage({ visible: true, message: 'AI draft generated successfully!' });
+        } catch (error) {
+            setModalMessage({ visible: true, message: 'Failed to generate script with AI. ' + error.message });
+        } finally {
+            setIsGenerating(false);
+        }
+    };
 
     const handleParamChange = (index, field, value) => {
         const updatedParams = [...params];
@@ -147,7 +166,17 @@ const AddNewScriptModal = ({ isOpen, onClose, onScriptAdded, scripts, scriptToEd
                                 <div className="pointer-events-none absolute inset-y-0 right-0 top-6 flex items-center px-2 text-gray-700"><ChevronDown className="h-4 w-4" /></div>
                             </div>
 
-                            <textarea placeholder="Script Description" value={description} onChange={e => setDescription(e.target.value)} className="w-full px-4 py-3 border border-gray-300 rounded-lg resize-y h-24 focus:outline-none focus:ring-2 focus:ring-blue-500" />
+                            <div>
+                                <textarea placeholder="Script Description" value={description} onChange={e => setDescription(e.target.value)} className="w-full px-4 py-3 border border-gray-300 rounded-lg resize-y h-24 focus:outline-none focus:ring-2 focus:ring-blue-500" />
+                                <button
+                                    onClick={handleGenerateScript}
+                                    disabled={isGenerating || !description.trim()}
+                                    className="flex items-center justify-center w-full px-4 py-2 mt-2 bg-purple-600 text-white font-semibold rounded-lg shadow-md hover:bg-purple-700 transition duration-300 disabled:bg-purple-300"
+                                >
+                                    {isGenerating ? <Loader2 size={20} className="animate-spin mr-2" /> : <Sparkles size={20} className="mr-2" />}
+                                    {isGenerating ? 'Generating...' : 'Generate with AI'}
+                                </button>
+                            </div>
                             <input type="text" placeholder="Tags (comma-separated)" value={tags} onChange={e => setTags(e.target.value)} className="w-full px-4 py-3 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500" />
                             <textarea 
                                 placeholder="Enter your script content here..." 

@@ -244,3 +244,14 @@ export const fetchAgentStatusApi = async () => {
         throw new Error('Failed to fetch agent status.');
     }
 };
+
+export const generateScriptSimpleApi = async (description) => {
+    try {
+        const response = await axios.post(`${API_BASE}/api/scripts/generate_simple`, { description });
+        return response.data;
+    } catch (error) {
+        console.error("API Error: Error generating simple script:", error);
+        const errorMessage = error.response?.data?.detail || 'Failed to generate script with AI.';
+        throw new Error(errorMessage);
+    }
+};

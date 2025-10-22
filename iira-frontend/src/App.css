@@ -39,3 +39,13 @@ body {
 .transition-width {
   transition-property: width;
 }
+
+/* React Flow Customizations */
+.react-flow .react-flow__handle {
+  width: 8px;
+  height: 8px;
+}
+
+.react-flow .react-flow__controls {
+  box-shadow: 0 0 10px rgba(0,0,0,0.1);
+}

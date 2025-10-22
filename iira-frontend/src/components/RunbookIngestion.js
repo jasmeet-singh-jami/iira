@@ -1,7 +1,7 @@
 // src/components/RunbookIngestion.js
 import React from 'react';
-import { Plus, X, Search, BrainCircuit, Sparkles, Wand2, RefreshCcw, Loader2 } from 'lucide-react';
-import SearchableDropdown from './SearchableDropdown';
+import { BrainCircuit, Wand2, RefreshCcw, Loader2 } from 'lucide-react';
+import WorkflowBuilder from './WorkflowBuilder';
 
 const RunbookIngestion = ({
     title,
@@ -11,9 +11,7 @@ const RunbookIngestion = ({
     tags,
     setTags,
     steps,
-    handleStepChange,
-    addStep,
-    removeStep,
+    onStepsChange,
     availableScripts,
     onAddNewScript,
     uploadRunbook,
@@ -23,9 +21,12 @@ const RunbookIngestion = ({
     handleGenerateRunbook,
     handleRematchStepScript,
     onCreateScriptForStep,
-    loading,
+    isGenerating,
+    isParsing,
     resetRunbookSteps
 }) => {
+    
+    const isWorkflowView = steps.length > 1 || (steps.length === 1 && steps[0].description);
 
     return (
         <div className="p-8">
@@ -42,117 +43,76 @@ const RunbookIngestion = ({
                 </button>
             </div>
 
-            <div className="bg-blue-50 p-6 rounded-xl border border-blue-200 mb-6 shadow-inner">
-                <h3 className="text-xl font-bold text-blue-700 mb-3 flex items-center">
-                    <Wand2 className="h-6 w-6 mr-2" /> AI-Powered Runbook Onboarding
-                </h3>
-                <p className="text-sm text-gray-600 mb-4">
-                    Enter a problem description to generate a new Runbook, or paste an existing document to parse it.
-                </p>
-                <textarea
-                    placeholder="Describe the problem you want to solve (e.g., 'A web server is down and needs to be restarted') OR paste in a full, pre-written Runbook document..."
-                    value={rawText}
-                    onChange={e => setRawText(e.target.value)}
-                    className="w-full px-4 py-3 border border-gray-300 rounded-lg resize-y h-40 focus:outline-none focus:ring-2 focus:ring-blue-500 transition duration-200 text-sm"
-                />
-                <div className="flex justify-end space-x-2 mt-4">
-                    <button
-                        onClick={handleGenerateRunbook}
-                        disabled={loading}
-                        className={`flex items-center px-6 py-3 rounded-lg font-semibold transition-all duration-300 ${loading ? 'bg-purple-300 cursor-not-allowed' : 'bg-purple-600 text-white shadow-lg hover:bg-purple-700'}`}
-                    >
-                        {loading ? <Loader2 size={20} className="animate-spin mr-2" /> : <BrainCircuit size={20} className="mr-2" />}
-                        {loading ? 'Drafting...' : 'Draft Runbook with AI'}
-                    </button>
-                    <button
-                        onClick={handleParseDocument}
-                        disabled={loading}
-                        className={`flex items-center px-6 py-3 rounded-lg font-semibold transition-all duration-300 ${loading ? 'bg-blue-300 cursor-not-allowed' : 'bg-blue-600 text-white shadow-lg hover:bg-blue-700'}`}
-                    >
-                        {loading ? <Loader2 size={20} className="animate-spin mr-2" /> : <Wand2 size={20} className="mr-2" />}
-                        {loading ? 'Parsing...' : 'Parse Existing Runbook'}
-                    </button>
-                </div>
-            </div>
-
-            <div className="space-y-4">
-                <input
-                    type="text"
-                    placeholder="Runbook Title"
-                    value={title}
-                    onChange={e => setTitle(e.target.value)}
-                    className="w-full px-4 py-3 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 transition duration-200"
-                />
-                <textarea
-                    placeholder="Issue Description"
-                    value={issue}
-                    onChange={e => setIssue(e.target.value)}
-                    className="w-full px-4 py-3 border border-gray-300 rounded-lg resize-y h-24 focus:outline-none focus:ring-2 focus:ring-blue-500 transition duration-200"
-                />
-                <input
-                    type="text"
-                    placeholder="Tags (comma-separated, e.g., billing-service, app-server-01, database)"
-                    value={tags}
-                    onChange={e => setTags(e.target.value)}
-                    className="w-full px-4 py-3 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 transition duration-200"
-                />
-            </div>
-
-            <div className="space-y-6 mt-6">
-                <h3 className="text-2xl font-bold text-gray-800 border-b pb-2">Steps</h3>
-                {steps.map((step, index) => (
-                    <div key={index} className="flex items-start space-x-3 bg-gray-50 p-4 rounded-lg shadow-sm border border-gray-200">
-                        <span className="flex-shrink-0 mt-3 font-semibold text-lg text-gray-600">{index + 1}.</span>
-                        <div className="flex-grow space-y-2">
-                            <div className="flex items-center space-x-2">
-                                <input
-                                    type="text"
-                                    placeholder="Step Description"
-                                    value={step.description || ''}
-                                    onChange={e => handleStepChange(index, 'description', e.target.value)}
-                                    className="w-full px-4 py-3 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 transition duration-200"
-                                />
-                                <button
-                                    onClick={() => handleRematchStepScript(index)}
-                                    disabled={step.isMatching || step.isCreating}
-                                    className="p-3 bg-indigo-100 text-indigo-600 rounded-lg shadow-md hover:bg-indigo-200 transition duration-200 flex-shrink-0 disabled:bg-gray-200 disabled:cursor-not-allowed"
-                                    title="Find matching script for this step"
-                                >
-                                    {step.isMatching ? <Loader2 size={20} className="animate-spin" /> : <Search size={20} />}
-                                </button>
-                                <button
-                                    onClick={() => onCreateScriptForStep(index)}
-                                    disabled={step.isMatching || step.isCreating}
-                                    className="p-3 bg-green-100 text-green-600 rounded-lg shadow-md hover:bg-green-200 transition duration-200 flex-shrink-0 disabled:bg-gray-200 disabled:cursor-not-allowed"
-                                    title="Create a new script for this step using AI"
-                                >
-                                    {step.isCreating ? <Loader2 size={20} className="animate-spin" /> : <Sparkles size={20} />}
-                                </button>
-                            </div>
-                            <div className="relative flex items-center space-x-2">
-                                <div className="relative flex-grow">
-                                    <SearchableDropdown
-                                        options={availableScripts}
-                                        value={step.script_id || ''}
-                                        onChange={(value) => handleStepChange(index, 'script_id', value)}
-                                        placeholder="Select a Script (Optional)"
-                                    />
-                                </div>
-                                <button onClick={onAddNewScript} className="p-2 bg-blue-100 text-blue-600 rounded-full shadow-md hover:bg-blue-200 transition duration-200 flex-shrink-0" title="Add New Script">
-                                    <Plus size={20} />
-                                </button>
-                            </div>
-                        </div>
-                        {steps.length > 1 && (<button onClick={() => removeStep(index)} className="p-2 bg-red-100 text-red-600 rounded-full shadow-md hover:bg-red-200 transition duration-200" ><X size={20} /></button>)}
+            {!isWorkflowView ? (
+                // PHASE 1: Initial Onboarding View
+                <div className="bg-blue-50 p-6 rounded-xl border border-blue-200 mb-6 shadow-inner">
+                    <h3 className="text-xl font-bold text-blue-700 mb-3 flex items-center">
+                        <Wand2 className="h-6 w-6 mr-2" /> AI-Powered Runbook Onboarding
+                    </h3>
+                    <p className="text-sm text-gray-600 mb-4">
+                        Enter a problem description to generate a new Runbook, or paste an existing document to parse it.
+                    </p>
+                    <textarea
+                        placeholder="Describe the problem you want to solve (e.g., 'A web server is down and needs to be restarted') OR paste in a full, pre-written Runbook document..."
+                        value={rawText}
+                        onChange={e => setRawText(e.target.value)}
+                        className="w-full px-4 py-3 border border-gray-300 rounded-lg resize-y h-40 focus:outline-none focus:ring-2 focus:ring-blue-500 transition duration-200 text-sm"
+                    />
+                    <div className="flex justify-end space-x-2 mt-4">
+                        <button
+                            onClick={handleGenerateRunbook}
+                            disabled={isGenerating || isParsing}
+                            className={`flex items-center px-6 py-3 rounded-lg font-semibold transition-all duration-300 ${isGenerating || isParsing ? 'bg-purple-300 cursor-not-allowed' : 'bg-purple-600 text-white shadow-lg hover:bg-purple-700'}`}
+                        >
+                            {isGenerating ? <Loader2 size={20} className="animate-spin mr-2" /> : <BrainCircuit size={20} className="mr-2" />}
+                            {isGenerating ? 'Drafting...' : 'Draft Runbook with AI'}
+                        </button>
+                        <button
+                            onClick={handleParseDocument}
+                            disabled={isGenerating || isParsing}
+                            className={`flex items-center px-6 py-3 rounded-lg font-semibold transition-all duration-300 ${isGenerating || isParsing ? 'bg-blue-300 cursor-not-allowed' : 'bg-blue-600 text-white shadow-lg hover:bg-blue-700'}`}
+                        >
+                            {isParsing ? <Loader2 size={20} className="animate-spin mr-2" /> : <Wand2 size={20} className="mr-2" />}
+                            {isParsing ? 'Parsing...' : 'Parse Existing Runbook'}
+                        </button>
                     </div>
-                ))}
-                <button onClick={addStep} className="flex items-center px-4 py-2 bg-green-500 text-white font-semibold rounded-lg shadow-md hover:bg-green-600 transition duration-300 mt-4" >
-                    <Plus size={20} className="mr-2" /> Add Step
-                </button>
-            </div>
-            <button onClick={uploadRunbook} className="w-full sm:w-auto mt-6 px-8 py-3 bg-blue-600 text-white font-bold rounded-lg shadow-lg hover:bg-blue-700 transition duration-300" >
-                Upload Runbook
-            </button>
+                </div>
+            ) : (
+                // PHASE 2: Workflow Builder View
+                <div>
+                    <div className="space-y-4 mb-6">
+                         <input
+                            type="text"
+                            placeholder="Runbook Title"
+                            value={title}
+                            onChange={e => setTitle(e.target.value)}
+                            className="w-full px-4 py-3 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 transition duration-200"
+                         />
+                         <textarea
+                            placeholder="Issue Description"
+                            value={issue}
+                            onChange={e => setIssue(e.target.value)}
+                            className="w-full px-4 py-3 border border-gray-300 rounded-lg resize-y h-24 focus:outline-none focus:ring-2 focus:ring-blue-500 transition duration-200"
+                         />
+                         <input
+                            type="text"
+                            placeholder="Tags (comma-separated)"
+                            value={tags}
+                            onChange={e => setTags(e.target.value)}
+                            className="w-full px-4 py-3 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 transition duration-200"
+                         />
+                    </div>
+                    <WorkflowBuilder
+                        initialSteps={steps}
+                        availableScripts={availableScripts}
+                        onStepsChange={onStepsChange}
+                        onSave={uploadRunbook}
+                        onAddNewScript={onAddNewScript}
+                        onRematchStep={handleRematchStepScript}
+                        onCreateScript={onCreateScriptForStep}
+                    />
+                </div>
+            )}
         </div>
     );
 };

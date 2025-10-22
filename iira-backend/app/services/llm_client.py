@@ -12,9 +12,9 @@ logger = logging.getLogger(__name__)
 
 # Default models to use for different tasks
 DEFAULT_MODELS = {
-    "plan": "llama3:latest",
-    "param_extraction": "llama3:latest",
-    "sop_parser": "llama3:latest"
+    "plan": "llama3.1:8b",
+    "param_extraction": "llama3.1:8b",
+    "sop_parser": "llama3.1:8b"
 }
 
 # Default models (can be overridden by environment variables)
@@ -409,6 +409,65 @@ def generate_script_from_context_llm(sop_context: Dict) -> Dict:
 
     if not all(k in parsed_json for k in ["name", "description", "content", "params"]):
         raise ValueError("Invalid or incomplete JSON response from LLM during script generation: Missing required keys.")
+    
+    logger.info(f"✅ Successfully generated script draft: '{parsed_json.get('name')}'")
+    return parsed_json
+
+def generate_script_from_description_llm(description: str) -> Dict:
+    """
+    Generates a complete, structured script object from a single description string.
+    """
+    prompt = f"""
+    You are an expert DevOps engineer and a master scriptwriter. Your task is to author a complete, production-ready shell script based *only* on the user's description of what the script should do.
+
+    Your output MUST be a single, valid JSON object with no other text or explanations.
+
+    **User's Script Description:**
+    "{description}"
+
+    **Instructions:**
+    Based on the description above, generate a JSON object with the following structure:
+    {{
+      "name": "string (a descriptive, short name for the script, e.g., 'check-disk-space.sh')",
+      "description": "string (this should be the same as the user's provided description)",
+      "content": "string (the full #!/bin/bash script content, formatted as a SINGLE-LINE JSON string with all newlines properly escaped as \\n)",
+      "params": [
+        {{
+          "param_name": "string (e.g., 'HOSTNAME')",
+          "param_type": "string (e.g., 'string', 'integer', 'boolean')",
+          "required": "boolean (true if the script cannot run without this parameter)"
+        }}
+      ]
+    }}
+
+    **Parameter Rules:**
+    - Identify any variables in the description that would need to be passed as arguments to the script. These are your parameters.
+    - Use clear, uppercase parameter names (e.g., 'TARGET_DIRECTORY', 'SERVICE_NAME').
+    - If no parameters are needed, provide an empty array: "params": []
+
+    **Final JSON Output:**
+    """
+    
+    logger.info("🤖 Calling LLM to generate a new script from a simple description...")
+    response_text = call_ollama(prompt, model=settings.model_sop_parser)
+    logger.debug("LLM Response (Simple Script Generation): %s", response_text)
+    
+    # Use a regular expression to find the JSON block, ignoring surrounding text
+    json_match = re.search(r'\{.*\}', response_text, re.DOTALL)
+    if not json_match:
+        logger.error(f"No JSON object found in LLM response. Raw output: {response_text}")
+        raise ValueError("Invalid response from LLM: No JSON object found.")
+
+    json_string = json_match.group(0)
+    
+    try:
+        parsed_json = json.loads(json_string)
+    except json.JSONDecodeError as e:
+        logger.error(f"Failed to parse extracted JSON string. Error: {e}. String: {json_string}")
+        raise ValueError("Invalid response from LLM: Failed to parse JSON.")
+
+    if not all(k in parsed_json for k in ["name", "description", "content", "params"]):
+        raise ValueError("Invalid response from LLM: Missing required keys.")
     
     logger.info(f"✅ Successfully generated script draft: '{parsed_json.get('name')}'")
     return parsed_json

@@ -2,6 +2,7 @@ import React, { useState, useEffect } from 'react';
 import { ChevronDown, ChevronUp, Clock, RefreshCw } from 'lucide-react';
 import { fetchHistoryApi } from '../services/apis';
 import Modal from './Modal';
+import WorkflowTimeline from './WorkflowTimeline'; // Import the new component
 
 const History = ({ onDraftRunbook }) => {
   const [incidentHistory, setIncidentHistory] = useState([]);
@@ -9,10 +10,9 @@ const History = ({ onDraftRunbook }) => {
   const [expandedIncidents, setExpandedIncidents] = useState({});
   const [modal, setModal] = useState({ visible: false, message: '' });
 
-  // Pagination states for incident history
   const [page, setPage] = useState(1);
   const [totalPages, setTotalPages] = useState(1);
-  const limit = 10; // items per page
+  const limit = 10;
 
   const fetchHistory = async () => {
     setLoading(true);
@@ -30,7 +30,6 @@ const History = ({ onDraftRunbook }) => {
     }
   };
 
-  // Fetch data on page change
   useEffect(() => {
     fetchHistory();
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -44,7 +43,6 @@ const History = ({ onDraftRunbook }) => {
     }
   };
 
-  // Set up an interval to refresh data every minute
   useEffect(() => {
     const intervalId = setInterval(refreshHistory, 60000);
     return () => clearInterval(intervalId);
@@ -66,37 +64,20 @@ const History = ({ onDraftRunbook }) => {
 
   const getStatusColor = (status) => {
     switch (status) {
-      case 'New':
-        return 'bg-blue-200 text-blue-800';
-      case 'In Progress':
-        return 'bg-yellow-200 text-yellow-800';
-      case 'Resolved':
-        return 'bg-green-200 text-green-800';
-      case 'Error':
-        return 'bg-red-200 text-red-800';
-      case 'SOP not found':
-        return 'bg-purple-200 text-purple-800';
-      default:
-        return 'bg-gray-200 text-gray-800';
+      case 'New': return 'bg-blue-200 text-blue-800';
+      case 'In Progress': return 'bg-yellow-200 text-yellow-800';
+      case 'Resolved': return 'bg-green-200 text-green-800';
+      case 'Error': return 'bg-red-200 text-red-800';
+      case 'SOP not found': return 'bg-purple-200 text-purple-800';
+      default: return 'bg-gray-200 text-gray-800';
     }
   };
 
-  const handlePrev = () => {
-    if (page > 1) {
-      setPage(page - 1);
-    }
-  };
-
-  const handleNext = () => {
-    if (page < totalPages) {
-      setPage(page + 1);
-    }
-  };
+  const handlePrev = () => { if (page > 1) setPage(page - 1); };
+  const handleNext = () => { if (page < totalPages) setPage(page + 1); };
   
   const handleDraftRunbookClick = (incident) => {
-    if (onDraftRunbook) {
-      onDraftRunbook(incident);
-    }
+    if (onDraftRunbook) onDraftRunbook(incident);
   };
 
   if (loading && incidentHistory.length === 0) {
@@ -111,8 +92,8 @@ const History = ({ onDraftRunbook }) => {
   return (
     <div className="p-8 space-y-6">
       <div className="pb-4 border-b border-gray-200">
-          <h1 className="text-4xl font-extrabold text-gray-800">Incident Resolution History</h1>
-          <p className="mt-1 text-gray-500">Review the details and outcomes of all past automated incident resolutions.</p>
+        <h1 className="text-4xl font-extrabold text-gray-800">Incident Resolution History</h1>
+        <p className="mt-1 text-gray-500">Review the details and outcomes of all past automated incident resolutions.</p>
       </div>
 
       {incidentHistory.length === 0 ? (
@@ -126,10 +107,7 @@ const History = ({ onDraftRunbook }) => {
           <div className="space-y-4">
             {incidentHistory.map(incident => (
               <div key={incident.id} className="bg-white p-6 rounded-2xl shadow-lg border border-gray-200 transition-transform duration-300 hover:scale-[1.01]">
-                <div
-                  onClick={() => toggleExpand(incident.incident_number)}
-                  className="cursor-pointer flex justify-between items-center"
-                >
+                <div onClick={() => toggleExpand(incident.incident_number)} className="cursor-pointer flex justify-between items-center">
                   <div className="flex-1 min-w-0">
                     <h3 className="text-xl font-bold text-gray-800 flex items-center flex-wrap">
                       <span className="mr-3">Incident: {incident.incident_number}</span>
@@ -137,19 +115,10 @@ const History = ({ onDraftRunbook }) => {
                         {incident.status}
                       </span>
                     </h3>
-                    <p className="text-sm text-gray-500 mt-1">
-                      Last Updated: {formatDate(incident.resolved_at)}
-                    </p>
+                    <p className="text-sm text-gray-500 mt-1">Last Updated: {formatDate(incident.resolved_at)}</p>
                   </div>
-                  {/* --- MODIFIED CONDITION --- */}
                   {['SOP not found', 'Error'].includes(incident.status) && (
-                    <button
-                      onClick={(e) => {
-                        e.stopPropagation();
-                        handleDraftRunbookClick(incident);
-                      }}
-                      className="mr-4 px-3 py-1.5 bg-green-600 text-white text-xs font-semibold rounded-full shadow-md hover:bg-green-700 transition"
-                    >
+                    <button onClick={(e) => { e.stopPropagation(); handleDraftRunbookClick(incident); }} className="mr-4 px-3 py-1.5 bg-green-600 text-white text-xs font-semibold rounded-full shadow-md hover:bg-green-700 transition">
                       Draft Runbook with AI
                     </button>
                   )}
@@ -172,63 +141,30 @@ const History = ({ onDraftRunbook }) => {
                       </div>
                     </div>
                     <div>
-                      <h4 className="text-lg font-semibold text-gray-700">Resolved Scripts:</h4>
-                      {incident.resolved_scripts && incident.resolved_scripts.length > 0 ? (
-                        incident.resolved_scripts.map((script, index) => (
-                          <div key={index} className="bg-gray-50 p-3 rounded-lg mt-2 space-y-1">
-                            <p className="font-semibold text-gray-700">{index + 1}. {script.script_name || script.step_description}</p>
-                            {script.script_name && script.extracted_parameters && (
-                              <p className="text-sm text-gray-600">
-                                  <span className="font-medium">Parameters:</span>
-                                  <span className="font-mono ml-2">{JSON.stringify(script.extracted_parameters)}</span>
-                              </p>
-                            )}
-                            <div className={`rounded-lg p-2 mt-2 text-xs font-mono whitespace-pre-wrap max-h-32 overflow-y-auto ${script.status === 'success' ? 'bg-green-100' : script.status === 'error' ? 'bg-red-100' : 'bg-gray-200'}`}>
-                              {script.output || 'No output.'}
+                      <h4 className="text-lg font-semibold text-gray-700">Resolution Workflow:</h4>
+                        {incident.resolved_scripts && incident.resolved_scripts.length > 0 ? (
+                            <div className="mt-4">
+                                <WorkflowTimeline steps={incident.resolved_scripts} />
                             </div>
-                          </div>
-                        ))
-                      ) : (
-                        <p className="text-sm text-gray-400">No scripts were executed.</p>
-                      )}
+                        ) : (
+                            <p className="text-sm text-gray-400 mt-2">No scripts were executed.</p>
+                        )}
                     </div>
                   </div>
                 )}
               </div>
             ))}
           </div>
-
           <div className="flex justify-between items-center mt-6">
-            <button
-              onClick={handlePrev}
-              disabled={page === 1 || loading}
-              className="px-4 py-2 bg-gray-200 rounded-lg disabled:opacity-50"
-            >
-              Previous
-            </button>
-            <span>
-              Page {page} of {totalPages}
-            </span>
-            <button
-              onClick={handleNext}
-              disabled={page === totalPages || loading}
-              className="px-4 py-2 bg-gray-200 rounded-lg disabled:opacity-50"
-            >
-              Next
-            </button>
+            <button onClick={handlePrev} disabled={page === 1 || loading} className="px-4 py-2 bg-gray-200 rounded-lg disabled:opacity-50">Previous</button>
+            <span>Page {page} of {totalPages}</span>
+            <button onClick={handleNext} disabled={page === totalPages || loading} className="px-4 py-2 bg-gray-200 rounded-lg disabled:opacity-50">Next</button>
           </div>
         </>
       )}
-
-      <button
-        onClick={refreshHistory}
-        disabled={loading}
-        className="fixed bottom-10 right-10 bg-blue-600 text-white p-4 rounded-full shadow-lg hover:bg-blue-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-blue-500 transition-transform duration-200 hover:scale-110 disabled:bg-blue-400 disabled:cursor-not-allowed"
-        title="Refresh History"
-      >
+      <button onClick={refreshHistory} disabled={loading} className="fixed bottom-10 right-10 bg-blue-600 text-white p-4 rounded-full shadow-lg hover:bg-blue-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-blue-500 transition-transform duration-200 hover:scale-110 disabled:bg-blue-400 disabled:cursor-not-allowed" title="Refresh History">
         <RefreshCw size={24} className={loading ? 'animate-spin' : ''} />
       </button>
-      
       <Modal message={modal.message} visible={modal.visible} onClose={() => setModal({ visible: false, message: '' })} />
     </div>
   );

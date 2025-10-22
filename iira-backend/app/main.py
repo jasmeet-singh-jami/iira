@@ -38,7 +38,8 @@ from app.services.llm_client import (
     generate_detailed_sop_from_llm,
     get_clarifying_questions_from_llm,
     get_llm_plan,
-    generate_script_from_context_llm
+    generate_script_from_context_llm,
+    generate_script_from_description_llm
 )
 
 from pydantic import BaseModel
@@ -141,6 +142,9 @@ class GenerateScriptContext(BaseModel):
     issue: str
     steps: List[str]
     target_step_description: str    
+
+class GenerateSimpleScriptRequest(BaseModel):
+    description: str    
 
 async def monitor_new_incidents():
     """
@@ -544,3 +548,16 @@ def generate_script_endpoint(context: GenerateScriptContext):
     except Exception as e:
         logger.exception("🔥 Error during AI-powered script generation")
         raise HTTPException(status_code=500, detail=f"An error occurred during script generation: {str(e)}")
+    
+@app.post("/scripts/generate_simple", summary="Generate a script from a simple description")
+def generate_script_simple(request: GenerateSimpleScriptRequest):
+    """
+    Takes a simple description and uses an LLM to generate a complete script
+    object, including a name, content, and parameters.
+    """
+    try:
+        script_object = generate_script_from_description_llm(request.description)
+        return JSONResponse(content=script_object, status_code=200)
+    except Exception as e:
+        logger.exception("🔥 Error during simple AI-powered script generation")
+        raise HTTPException(status_code=500, detail=f"An error occurred during script generation: {str(e)}")    
