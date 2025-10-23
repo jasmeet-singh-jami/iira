@@ -103,7 +103,7 @@ const IncidentResolution = ({
         <div className="p-8">
             <div className="pb-4 border-b border-gray-200 mb-8">
                 <h1 className="text-4xl font-extrabold text-gray-800">Test Bed</h1>
-                <p className="mt-1 text-gray-500">Manually resolve an incident to test a Runbook resolution flow.</p>
+                <p className="mt-1 text-gray-500">Manually resolve an incident to test an Agent resolution flow.</p> {/* Changed description */}
             </div>
 
             <div className="flex flex-col sm:flex-row space-y-3 sm:space-y-0 sm:space-x-4 mb-6">

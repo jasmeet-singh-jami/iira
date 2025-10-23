@@ -4,7 +4,7 @@ import { fetchHistoryApi } from '../services/apis';
 import Modal from './Modal';
 import WorkflowTimeline from './WorkflowTimeline'; // Import the new component
 
-const History = ({ onDraftRunbook }) => {
+const History = ({ onDraftRunbook }) => { // Prop name kept for consistency with App.js handler
   const [incidentHistory, setIncidentHistory] = useState([]);
   const [loading, setLoading] = useState(true);
   const [expandedIncidents, setExpandedIncidents] = useState({});
@@ -76,7 +76,7 @@ const History = ({ onDraftRunbook }) => {
   const handlePrev = () => { if (page > 1) setPage(page - 1); };
   const handleNext = () => { if (page < totalPages) setPage(page + 1); };
   
-  const handleDraftRunbookClick = (incident) => {
+  const handleDraftAgentClick = (incident) => { // Renamed handler for clarity
     if (onDraftRunbook) onDraftRunbook(incident);
   };
 
@@ -118,8 +118,8 @@ const History = ({ onDraftRunbook }) => {
                     <p className="text-sm text-gray-500 mt-1">Last Updated: {formatDate(incident.resolved_at)}</p>
                   </div>
                   {['SOP not found', 'Error'].includes(incident.status) && (
-                    <button onClick={(e) => { e.stopPropagation(); handleDraftRunbookClick(incident); }} className="mr-4 px-3 py-1.5 bg-green-600 text-white text-xs font-semibold rounded-full shadow-md hover:bg-green-700 transition">
-                      Draft Runbook with AI
+                    <button onClick={(e) => { e.stopPropagation(); handleDraftAgentClick(incident); }} className="mr-4 px-3 py-1.5 bg-green-600 text-white text-xs font-semibold rounded-full shadow-md hover:bg-green-700 transition">
+                      Draft Agent with AI {/* Changed button text */}
                     </button>
                   )}
                   <button className="text-blue-600 hover:text-blue-800 transition duration-200">

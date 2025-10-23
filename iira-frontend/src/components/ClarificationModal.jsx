@@ -46,7 +46,7 @@ const ClarificationModal = ({ isOpen, questions, answers, setAnswers, onSubmit, 
 
                         <div className="space-y-4 max-h-[60vh] overflow-y-auto pr-2">
                             <p className="text-gray-600 mb-4">
-                                To generate a more accurate Runbook, please answer the following questions:
+                                To generate a more accurate Agent, please answer the following questions: {/* Changed text */}
                             </p>
                             {questions.map((q, index) => (
                                 <div key={index} className="space-y-2">

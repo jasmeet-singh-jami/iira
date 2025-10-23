@@ -1,8 +1,8 @@
 import React, { useState, useEffect } from 'react';
-import { BookOpen, FileCode, AlertTriangle, RefreshCw, PlusCircle, Trash2, Edit } from 'lucide-react';
+import { BookOpen, AlertTriangle, RefreshCw, PlusCircle, Trash2, Edit, Wrench } from 'lucide-react';
 import { fetchSystemStatsApi, fetchActivityLogApi } from '../services/apis';
 import Modal from './Modal';
-import AgentStatusPanel from './AgentStatusPanel'; 
+import AgentStatusPanel from './AgentStatusPanel';
 
 const StatCard = ({ icon, title, value, colorClass }) => (
     <div className={`flex items-center p-6 bg-white rounded-2xl shadow-md border border-gray-200 ${colorClass}`}>
@@ -17,6 +17,7 @@ const StatCard = ({ icon, title, value, colorClass }) => (
 );
 
 const ActivityItem = ({ activity }) => {
+    // Icons remain mostly the same, representing actions
     const ICONS = {
         CREATE_SCRIPT: <PlusCircle className="text-green-500" size={20} />,
         UPDATE_SCRIPT: <Edit className="text-yellow-500" size={20} />,
@@ -25,12 +26,13 @@ const ActivityItem = ({ activity }) => {
         DELETE_SOP: <Trash2 className="text-red-500" size={20} />,
     };
 
+    // Updated TITLES to reflect "Worker Task"
     const TITLES = {
-        CREATE_SCRIPT: `New script created: "${activity.details.script_name}"`,
-        UPDATE_SCRIPT: `Script updated: "${activity.details.script_name}"`,
-        DELETE_SCRIPT: `Script deleted: "${activity.details.script_name}"`,
-        CREATE_SOP: `New SOP ingested: "${activity.details.sop_title}"`,
-        DELETE_SOP: `SOP deleted: "${activity.details.sop_title}"`,
+        CREATE_SCRIPT: `New worker task created: "${activity.details.script_name}"`,
+        UPDATE_SCRIPT: `Worker task updated: "${activity.details.script_name}"`,
+        DELETE_SCRIPT: `Worker task deleted: "${activity.details.script_name}"`,
+        CREATE_SOP: `New Agent ingested: "${activity.details.sop_title}"`,
+        DELETE_SOP: `Agent deleted: "${activity.details.sop_title}"`,
     };
 
     const formatDate = (dateString) => {
@@ -52,6 +54,7 @@ const ActivityItem = ({ activity }) => {
 
 
 const Dashboard = () => {
+    // State names remain for backend consistency
     const [stats, setStats] = useState({ total_sops: 0, total_scripts: 0, total_incidents: 0 });
     const [activityLog, setActivityLog] = useState([]);
     const [loading, setLoading] = useState(true);
@@ -61,7 +64,7 @@ const Dashboard = () => {
         setLoading(true);
         try {
             const statsData = await fetchSystemStatsApi();
-            const activityData = await fetchActivityLogApi(1, 10); // Fetch first 10 activities
+            const activityData = await fetchActivityLogApi(1, 10);
             setStats(statsData);
             if (activityData && activityData.activities) {
                 setActivityLog(activityData.activities);
@@ -86,17 +89,17 @@ const Dashboard = () => {
             </div>
 
             <AgentStatusPanel />
-            
+
             <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-6">
                 <StatCard
-                    icon={<FileCode size={28} className="text-blue-500" />}
-                    title="Total Scripts"
+                    icon={<Wrench size={28} className="text-blue-500" />}
+                    title="Total Worker Tasks"
                     value={stats.total_scripts}
                     colorClass="bg-blue-50"
                 />
                 <StatCard
                     icon={<BookOpen size={28} className="text-green-500" />}
-                    title="Active SOPs"
+                    title="Active Agents"
                     value={stats.total_sops}
                     colorClass="bg-green-50"
                 />
@@ -133,3 +136,4 @@ const Dashboard = () => {
 };
 
 export default Dashboard;
+

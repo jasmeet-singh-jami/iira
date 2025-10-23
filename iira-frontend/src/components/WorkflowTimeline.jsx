@@ -66,6 +66,8 @@ const WorkflowTimeline = ({ steps, onExecuteStep, executionDisabled }) => {
             <div className="absolute left-11 top-0 h-full w-0.5 bg-gray-200" aria-hidden="true"></div>
 
             {steps.map((step, index) => {
+                // Backend data structure still uses 'script_name'
+                const taskName = step.script_name; 
                 const { borderColor, bgColor } = getStatusStyles(step.executionStatus || step.status);
                 
                 return (
@@ -81,9 +83,9 @@ const WorkflowTimeline = ({ steps, onExecuteStep, executionDisabled }) => {
                                 <div className="flex-1">
                                     <p className="font-bold text-lg text-gray-800">{step.step_description}</p>
                                     
-                                    {step.script_name ? (
+                                    {taskName ? (
                                         <div className="mt-4 font-mono text-sm">
-                                            <p className="font-semibold text-blue-700">Script: <span className="text-gray-700">{step.script_name}</span></p>
+                                            <p className="font-semibold text-blue-700">Worker Task: <span className="text-gray-700">{taskName}</span></p>
                                             
                                             {(step.parameters && step.parameters.length > 0) && (
                                                 <div className="mt-2 text-xs">
@@ -116,7 +118,7 @@ const WorkflowTimeline = ({ steps, onExecuteStep, executionDisabled }) => {
                                     ) : (
                                         <div className="mt-3 bg-yellow-100 text-yellow-800 p-3 rounded-lg font-semibold text-sm flex items-center">
                                             <AlertCircle size={16} className="inline mr-2" />
-                                            No matching script found for this step.
+                                            No matching worker task found for this step.
                                         </div>
                                     )}
                                 </div>

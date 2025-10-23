@@ -3,7 +3,7 @@ import React from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { AlertCircle } from 'lucide-react';
 
-const Modal = ({ message, onClose, onAddSOP }) => {
+const Modal = ({ message, onClose, onAddSOP }) => { // Prop name kept for consistency
     const backdropVariants = {
         hidden: { opacity: 0 },
         visible: { opacity: 1 },
@@ -40,7 +40,7 @@ const Modal = ({ message, onClose, onAddSOP }) => {
                                     onClick={onAddSOP}
                                     className="px-4 py-2 bg-green-600 text-white font-semibold rounded-lg shadow-md hover:bg-green-700 transition duration-300"
                                 >
-                                    Add New Runbook
+                                    Add New Agent {/* Changed button text */}
                                 </button>
                             )}
                             <button

@@ -22,8 +22,18 @@ import {
     generateSOPApi,
     generateScriptFromContextApi,
     parseSOPApi,
-    executeScriptApi
+    executeScriptApi,
+    generateScriptSimpleApi // Ensure this is imported if you added it
 } from './services/apis';
+
+// Helper function to create a new default step object
+const createNewStep = () => ({
+    description: 'New Step',
+    script_id: null,
+    script: null, // Keep script name consistent
+    isMatching: false,
+    isCreating: false
+});
 
 function App() {
     const [activePage, setActivePage] = useState('dashboard');
@@ -43,8 +53,8 @@ function App() {
     // Global state
     const [availableScripts, setAvailableScripts] = useState([]);
     const [incidentLoading, setIncidentLoading] = useState(false);
-    const [isGenerating, setIsGenerating] = useState(false);
-    const [isParsing, setIsParsing] = useState(false);
+    const [isGenerating, setIsGenerating] = useState(false); // For Agent generation/parsing
+    const [isParsing, setIsParsing] = useState(false);       // For Agent generation/parsing
     const [modal, setModal] = useState({ visible: false, message: '' });
     const [isScriptModalOpen, setIsScriptModalOpen] = useState(false);
     const [scriptToEdit, setScriptToEdit] = useState(null);
@@ -94,7 +104,7 @@ function App() {
         setSteps([{ description: '', script_id: null, isMatching: false, isCreating: false }]);
         setRawText('');
     };
-    
+
     const handleDraftAndGenerateFromHistory = async (incident) => {
         const description = `Incident ${incident.incident_number}: ${incident.incident_data.short_description}\n\nFull Description:\n${incident.incident_data.description || ''}`;
         setRawText(description);
@@ -110,7 +120,7 @@ function App() {
                 setTitle(response.title);
                 setIssue(response.issue);
                 setSteps(response.steps.map(s => ({...s, isMatching: false, isCreating: false })));
-                setModal({ visible: true, message: 'Runbook draft generated successfully from history!' });
+                setModal({ visible: true, message: 'Agent draft generated successfully from history!' });
             }
         } catch (error) {
             setModal({ visible: true, message: error.message });
@@ -121,7 +131,7 @@ function App() {
 
     const handleGenerateRunbook = async () => {
         if (!rawText.trim()) {
-            setModal({ visible: true, message: 'Please enter a problem description to generate a Runbook.' });
+            setModal({ visible: true, message: 'Please enter a problem description to generate an Agent.' });
             return;
         }
         setIsGenerating(true);
@@ -135,7 +145,7 @@ function App() {
                 setTitle(response.title);
                 setIssue(response.issue);
                 setSteps(response.steps.map(s => ({...s, isMatching: false, isCreating: false })));
-                setModal({ visible: true, message: 'Runbook draft generated successfully!' });
+                setModal({ visible: true, message: 'Agent draft generated successfully!' });
             }
         } catch (error) {
             setModal({ visible: true, message: error.message });
@@ -153,7 +163,7 @@ function App() {
                 setTitle(response.title);
                 setIssue(response.issue);
                 setSteps(response.steps.map(s => ({...s, isMatching: false, isCreating: false })));
-                setModal({ visible: true, message: 'Runbook draft generated successfully from your answers!' });
+                setModal({ visible: true, message: 'Agent draft generated successfully from your answers!' });
             }
         } catch (error) {
             setModal({ visible: true, message: error.message });
@@ -173,14 +183,14 @@ function App() {
             setTitle(parsedData.title);
             setIssue(parsedData.issue);
             setSteps(parsedData.steps.map(s => ({...s, isMatching: false, isCreating: false })));
-            setModal({ visible: true, message: 'Runbook parsed successfully!' });
+            setModal({ visible: true, message: 'Agent parsed successfully!' });
         } catch (error) {
-            setModal({ visible: true, message: 'Failed to parse Runbook with AI. ' + error.message });
+            setModal({ visible: true, message: 'Failed to parse Agent with AI. ' + error.message });
         } finally {
             setIsParsing(false);
         }
     };
-    
+
     const handleRematchStepScript = async (stepIndex) => {
         const currentStep = steps[stepIndex];
         if (!currentStep || !currentStep.description.trim()) {
@@ -194,13 +204,15 @@ function App() {
             const matchResult = await matchScriptApi(currentStep.description);
             setSteps(currentSteps => currentSteps.map((step, idx) => {
                 if (idx === stepIndex) {
+                    // Update script details and turn off loading state
                     return { ...step, script_id: matchResult.script_id, script: matchResult.script_name, isMatching: false };
                 }
                 return step;
             }));
-            setModal({ visible: true, message: matchResult.script_name ? `Found match: ${matchResult.script_name}` : 'No confident script match found.' });
+            setModal({ visible: true, message: matchResult.script_name ? `Found match: ${matchResult.script_name}` : 'No confident worker task match found.' });
         } catch (error) {
             setModal({ visible: true, message: error.message });
+             // Ensure loading state is turned off on error
              setSteps(currentSteps => currentSteps.map((step, idx) => idx === stepIndex ? { ...step, isMatching: false } : step));
         }
     };
@@ -208,7 +220,7 @@ function App() {
     const handleCreateScriptForStep = async (stepIndex) => {
         const targetStep = steps[stepIndex];
         if (!targetStep || !targetStep.description.trim()) {
-            setModal({ visible: true, message: 'Please provide a description for the step before generating a script.' });
+            setModal({ visible: true, message: 'Please provide a description for the step before generating a worker task.' });
             return;
         }
 
@@ -222,35 +234,80 @@ function App() {
                 target_step_description: targetStep.description
             };
             const generatedScript = await generateScriptFromContextApi(context);
-            setScriptToEdit(generatedScript);
-            setIsScriptModalOpen(true);
+            setScriptToEdit(generatedScript); // Pre-populate the modal
+            setIsScriptModalOpen(true); // Open the Add/Edit modal
 
         } catch (error) {
             setModal({ visible: true, message: error.message });
         } finally {
+            // Turn off loading state after API call completes (success or error)
             setSteps(currentSteps => currentSteps.map((step, idx) => idx === stepIndex ? { ...step, isCreating: false } : step));
         }
     };
-    
+
+    // Callback function passed to WorkflowBuilder's onStepsChange prop
     const onStepsChange = (newSteps) => {
         setSteps(newSteps);
     };
 
-    const uploadRunbook = async () => {
-        if (!title.trim() || !issue.trim()) {
-            setModal({ visible: true, message: 'Title and Issue cannot be empty.' });
+    // --- FUNCTION TO ADD A NEW STEP to the state ---
+    const handleAddStep = () => {
+        setSteps(currentSteps => [
+            ...currentSteps,
+            // Add a new step object at the end with default values
+            { description: 'New Step', script_id: null, isMatching: false, isCreating: false }
+        ]);
+    };
+
+    const handleDeleteStep = (indexToDelete) => {
+        console.log("App.js requesting delete confirmation for index:", indexToDelete);
+        if (steps.length <= 1) {
+            setModal({ visible: true, message: 'Cannot delete the only step.' });
             return;
         }
-        const validSteps = steps.filter(step => step.description.trim());
+        // Set confirmation modal state instead of deleting directly
+        setConfirmationModal({
+            isOpen: true,
+            title: 'Delete Step',
+            message: `Are you sure you want to delete Step ${indexToDelete + 1}? This action cannot be undone.`,
+            // The onConfirm callback will perform the actual deletion
+            onConfirm: () => {
+                console.log("Confirmation received for deleting index:", indexToDelete);
+                setSteps(currentSteps => currentSteps.filter((_, index) => index !== indexToDelete));
+                closeConfirmationModal(); // Close modal after confirmation
+            }
+        });
+    };
+
+    const handleInsertStep = (indexToInsertAfter) => {
+        console.log("App.js handleInsertStep called for index after:", indexToInsertAfter); // Debug log
+        setSteps(currentSteps => {
+            const newSteps = [...currentSteps];
+            newSteps.splice(indexToInsertAfter + 1, 0, createNewStep());
+            return newSteps;
+        });
+    };
+
+    const uploadRunbook = async () => {
+        if (!title.trim() || !issue.trim()) {
+            setModal({ visible: true, message: 'Agent Title and Issue cannot be empty.' });
+            return;
+        }
+        // Filter out empty steps *before* sending to backend
+        const validSteps = steps
+          .filter(step => step.description.trim())
+          .map(({ isMatching, isCreating, ...rest }) => rest); // Remove UI state flags
+
         if (validSteps.length === 0) {
-            setModal({ visible: true, message: 'Please provide at least one step.' });
+            setModal({ visible: true, message: 'Please provide at least one valid step description.' });
             return;
         }
         try {
-            const sop = { title, issue, tags: tags.split(',').map(t=>t.trim()), steps: validSteps };
+            // Use the cleaned validSteps
+            const sop = { title, issue, tags: tags.split(',').map(t=>t.trim()).filter(t => t), steps: validSteps };
             await uploadSOPApi(sop);
-            setModal({ visible: true, message: 'Runbook ingested successfully!' });
-            resetRunbookForm();
+            setModal({ visible: true, message: 'Agent ingested successfully!' });
+            resetRunbookForm(); // Reset form after successful upload
         } catch (error) {
             setModal({ visible: true, message: error.message });
         }
@@ -266,16 +323,21 @@ function App() {
         try {
             const data = await resolveIncidentApi(incidentNumber);
             setIncidentDetails(data.incident_data);
-            setResolvedScripts(data.resolved_scripts);
+            // Ensure resolvedScripts is always an array
+            setResolvedScripts(Array.isArray(data.resolved_scripts) ? data.resolved_scripts : []);
         } catch (error) {
             setModal({ visible: true, message: error.message });
             setIncidentDetails(null);
+            setResolvedScripts([]); // Clear on error too
         } finally {
             setIncidentLoading(false);
         }
     };
 
     const executeScript = async (scriptToExecute, scriptIndex) => {
+        // Ensure scriptIndex is valid
+        if (scriptIndex < 0 || scriptIndex >= resolvedScripts.length) return;
+
         setResolvedScripts(currentScripts =>
             currentScripts.map((script, index) =>
                 index === scriptIndex ? { ...script, executionStatus: 'running' } : script
@@ -283,10 +345,11 @@ function App() {
         );
 
         try {
+            // Use the correct API function name
             const result = await executeScriptApi(
                 scriptToExecute.script_id,
                 scriptToExecute.script_name,
-                scriptToExecute.extracted_parameters
+                scriptToExecute.extracted_parameters || {} // Ensure parameters is an object
             );
             setResolvedScripts(currentScripts =>
                 currentScripts.map((script, index) =>
@@ -301,15 +364,22 @@ function App() {
             );
         }
     };
-    
+
     const onExecuteAll = async () => {
-        for (let i = 0; i < resolvedScripts.length; i++) {
-            const step = resolvedScripts[i];
-            if (step.script_id && step.script_id !== 'Not Found' && step.executionStatus !== 'success') {
-                 await executeScript(step, i);
-            }
-        }
-    };
+         // Create a stable copy of the scripts to iterate over
+         const scriptsToExecute = [...resolvedScripts];
+         for (let i = 0; i < scriptsToExecute.length; i++) {
+             const step = scriptsToExecute[i];
+             // Check the *current* state before executing
+             const currentStepState = resolvedScripts[i];
+             if (step.script_id && step.script_id !== 'Not Found' && currentStepState.executionStatus !== 'success' && currentStepState.executionStatus !== 'running') {
+                  await executeScript(step, i);
+                  // Optional: Add a small delay between executions if needed
+                  // await new Promise(resolve => setTimeout(resolve, 500));
+             }
+         }
+     };
+
 
     const pageVariants = {
         initial: { opacity: 0, y: 20 },
@@ -329,16 +399,16 @@ function App() {
                 return <Dashboard />;
             case 'history':
                 return <History onDraftRunbook={handleDraftAndGenerateFromHistory} />;
-            case 'manage-runbooks':
+            case 'manage-runbooks': // Keep internal ID consistent
                 return <RunbookDeletion />;
-            case 'onboard-runbook':
+            case 'onboard-runbook': // Keep internal ID consistent
                  return <RunbookIngestion
                             title={title} setTitle={setTitle}
                             issue={issue} setIssue={setIssue}
                             tags={tags} setTags={setTags}
                             steps={steps}
                             onStepsChange={onStepsChange}
-                            availableScripts={availableScripts}
+                            availableScripts={availableScripts} // Pass worker tasks here
                             onAddNewScript={handleOpenAddScriptModal}
                             uploadRunbook={uploadRunbook}
                             rawText={rawText} setRawText={setRawText}
@@ -349,9 +419,13 @@ function App() {
                             isGenerating={isGenerating}
                             isParsing={isParsing}
                             resetRunbookSteps={resetRunbookForm}
+                            onAddStep={handleAddStep} // Pass the add step handler
+                            onDeleteStep={handleDeleteStep}
+                            onInsertStep={handleInsertStep} 
+							setConfirmationModal={setConfirmationModal}
                         />;
-            case 'scripts':
-                return <ScriptsPage />;
+            case 'scripts': // Keep internal ID consistent
+                return <ScriptsPage setConfirmationModal={setConfirmationModal}/>;
             case 'testbed':
                 return <IncidentResolution
                             incidentNumber={incidentNumber} setIncidentNumber={setIncidentNumber}
@@ -388,9 +462,10 @@ function App() {
             <AddNewScriptModal
                 isOpen={isScriptModalOpen}
                 onClose={() => setIsScriptModalOpen(false)}
-                onScriptAdded={fetchScripts}
-                scripts={availableScripts}
+                onScriptAdded={fetchScripts} // Refreshes the list of worker tasks
+                scripts={availableScripts} // Passes the list for name checking
                 scriptToEdit={scriptToEdit}
+                generateScriptSimpleApi={generateScriptSimpleApi} // Pass API function if needed inside modal
             />
             <ConfirmationModal
                 isOpen={confirmationModal.isOpen}
@@ -413,3 +488,4 @@ function App() {
 }
 
 export default App;
+
