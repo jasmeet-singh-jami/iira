@@ -1,17 +1,17 @@
 import React, { useState } from 'react';
-import { ChevronLeft, LayoutDashboard, Clock, BookOpen, PlusCircle, Wrench, FlaskConical } from 'lucide-react'; // Using Wrench for Worker Tasks
+import { ChevronLeft, LayoutDashboard, Clock, BookOpen, PlusCircle, Wrench, FlaskConical } from 'lucide-react';
 import iiraIcon from '../assets/iira-icon.png';
 
 const Sidebar = ({ activePage, setActivePage }) => {
     const [isCollapsed, setIsCollapsed] = useState(false);
 
+    // Reordered menu items to place Knowledge Base before Automation
     const menuItems = [
         { id: 'dashboard', label: 'Dashboard', icon: LayoutDashboard, section: 'OVERVIEW' },
-        { id: 'history', label: 'History', icon: Clock, section: 'AUTOMATION' },
         { id: 'manage-runbooks', label: 'Agents Library', icon: BookOpen, section: 'KNOWLEDGE BASE' },
         { id: 'onboard-runbook', label: 'Onboard Agent', icon: PlusCircle, section: 'KNOWLEDGE BASE' },
-        // Use 'scripts' as the ID for routing/state management, but display 'Worker Tasks'
-        { id: 'scripts', label: 'Worker Tasks', icon: Wrench, section: 'KNOWLEDGE BASE' }, 
+        { id: 'scripts', label: 'Worker Tasks', icon: Wrench, section: 'KNOWLEDGE BASE' },
+        { id: 'history', label: 'History', icon: Clock, section: 'AUTOMATION' },
         { id: 'testbed', label: 'Test Bed', icon: FlaskConical, section: 'DEVELOPMENT' },
     ];
 
@@ -52,12 +52,11 @@ const Sidebar = ({ activePage, setActivePage }) => {
                                     <button
                                         onClick={() => setActivePage(item.id)}
                                         className={`w-full flex items-center p-3 text-base font-medium rounded-lg transition-colors duration-200 ${
-                                            // Use the internal ID for comparison
-                                            activePage === item.id 
+                                            activePage === item.id
                                                 ? 'bg-blue-100 text-blue-700 shadow-sm'
                                                 : 'text-gray-600 hover:bg-gray-100'
                                         }`}
-                                        title={item.label} // Tooltip shows the updated label
+                                        title={item.label}
                                     >
                                         <item.icon size={20} className="flex-shrink-0" />
                                         {!isCollapsed && <span className="ml-4">{item.label}</span>}
@@ -77,4 +76,3 @@ const Sidebar = ({ activePage, setActivePage }) => {
 };
 
 export default Sidebar;
-

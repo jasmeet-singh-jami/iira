@@ -2,7 +2,7 @@ services:
   frontend:
     build:
       context: ./iira-frontend
-    image: iira/iira-frontend:2.4
+    image: iira/iira-frontend:2.7
     container_name: react-frontend
     ports:
       # Map the local port 3000 to the container's port 80 (where Nginx is running)
