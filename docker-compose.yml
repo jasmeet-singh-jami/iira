@@ -59,8 +59,19 @@ services:
   #       fi &&
   #       wait -n
   #     "
+# --- Add Redis Service ---
+  redis:
+    image: redis:7-alpine # Use a specific stable version
+    container_name: iira-redis # Specific container name
+    restart: always
+    ports:
+      - "6379:6379" # Map default Redis port
+    volumes:
+      - redis_data:/data # Mount named volume for persistence
+  # --- End Redis Service ---
 
 volumes:
   postgres_data:
   qdrant_storage:
   # ollama_models:
+  redis_data:

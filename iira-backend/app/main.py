@@ -42,12 +42,24 @@ from app.services.llm_client import (
     generate_script_from_description_llm
 )
 
+from fastapi import BackgroundTasks
+from app.services.long_term_learning import (
+    analyze_feedback_data,
+    populate_cache_from_feedback,
+    trigger_model_finetuning
+)
+
+from app.services.settings_service import load_search_thresholds
+from app.services.feedback_service import add_retrieval_feedback
+from app.utils.redis_client import init_redis_pool, close_redis_pool # <<< ADD THIS IMPORT
+
 from pydantic import BaseModel
 from typing import List, Dict, Optional, Any
 from contextlib import asynccontextmanager
 import asyncio
 import logging
 import datetime
+import uuid
 
 # Configure logger
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
@@ -59,10 +71,13 @@ agent_status = {
     "last_checked": None
 }
 
+task_statuses = {}
+
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     logger.info("🚀 Application starting up. Performing initial script sync to Qdrant...")
     agent_status["status"] = "initializing"
+    await init_redis_pool() # <<< ADD THIS LINE
     await asyncio.to_thread(sync_scripts_to_qdrant)
     logger.info("✅ Initial script sync complete.")
 
@@ -75,6 +90,8 @@ async def lifespan(app: FastAPI):
     except asyncio.CancelledError:
         logger.info("🛑 Background incident monitor stopped.")
         agent_status["status"] = "stopped"
+    await close_redis_pool() # <<< ADD THIS LINE
+
 
 app = FastAPI(lifespan=lifespan)
 
@@ -145,6 +162,23 @@ class GenerateScriptContext(BaseModel):
 
 class GenerateSimpleScriptRequest(BaseModel):
     description: str    
+
+class AgentRecommendationRequest(BaseModel):
+    incident_number: Optional[str] = None
+    short_description: str
+    description: Optional[str] = None
+
+class RetrievalFeedbackRequest(BaseModel):
+    incident_number: Optional[str] = None
+    incident_short_description: str
+    incident_description: Optional[str] = None
+    recommended_agent_id: Optional[str] = None
+    recommended_agent_title: Optional[str] = None
+    search_score: Optional[float] = None
+    user_feedback_type: str # 'Correct' or 'Incorrect'
+    correct_agent_id: Optional[str] = None
+    correct_agent_title: Optional[str] = None
+    session_id: Optional[str] = None # Optional: To link feedback session    
 
 async def monitor_new_incidents():
     """
@@ -305,36 +339,36 @@ async def search_sop(q: str = Query(..., min_length=3), model: str = Query(DEFAU
     }, status_code=200)
 
 
-@app.get("/incident/{incident_number}")
-async def resolve_incident_by_number(
-    incident_number: str = Path(..., min_length=3),
-    source: Optional[str] = Query(None, description="Source of the request, e.g., 'test_bed'")
-):
-    incident_data = fetch_incident_by_number(incident_number.upper())
-    if not incident_data:
-        raise HTTPException(status_code=404, detail=f"Incident {incident_number} not found.")
+# @app.get("/incident/{incident_number}")
+# async def resolve_incident_by_number(
+#     incident_number: str = Path(..., min_length=3),
+#     source: Optional[str] = Query(None, description="Source of the request, e.g., 'test_bed'")
+# ):
+#     incident_data = fetch_incident_by_number(incident_number.upper())
+#     if not incident_data:
+#         raise HTTPException(status_code=404, detail=f"Incident {incident_number} not found.")
 
-    # Instantiate and run the Resolver Agent for the Test Bed
-    resolver_agent = ResolverAgent()
-    agent_result = await asyncio.to_thread(resolver_agent.run, incident_data)
+#     # Instantiate and run the Resolver Agent for the Test Bed
+#     resolver_agent = ResolverAgent()
+#     agent_result = await asyncio.to_thread(resolver_agent.run, incident_data)
     
-    if source != 'test_bed':
-        logger.info(f"📝 Logging Test Bed incident '{incident_number}' to history.")
-        add_incident_history_to_db(
-            incident_number, 
-            incident_data, 
-            agent_result.get("plan"), 
-            agent_result.get("frontend_trace")
-        )
-    else:
-        logger.info(f"🚫 Skipping history log for Test Bed incident '{incident_number}'")
+#     if source != 'test_bed':
+#         logger.info(f"📝 Logging Test Bed incident '{incident_number}' to history.")
+#         add_incident_history_to_db(
+#             incident_number, 
+#             incident_data, 
+#             agent_result.get("plan"), 
+#             agent_result.get("frontend_trace")
+#         )
+#     else:
+#         logger.info(f"🚫 Skipping history log for Test Bed incident '{incident_number}'")
 
-    return JSONResponse(content={
-        "incident_number": incident_number,
-        "incident_data": incident_data,
-        "llm_plan": agent_result.get("plan"),
-        "resolved_scripts": agent_result.get("frontend_trace"),
-    }, status_code=200)
+#     return JSONResponse(content={
+#         "incident_number": incident_number,
+#         "incident_data": incident_data,
+#         "llm_plan": agent_result.get("plan"),
+#         "resolved_scripts": agent_result.get("frontend_trace"),
+#     }, status_code=200)
 
 @app.get("/history")
 def get_incident_history(page: int = Query(1, ge=1), limit: int = Query(10, ge=1, le=100)):
@@ -561,3 +595,127 @@ def generate_script_simple(request: GenerateSimpleScriptRequest):
     except Exception as e:
         logger.exception("🔥 Error during simple AI-powered script generation")
         raise HTTPException(status_code=500, detail=f"An error occurred during script generation: {str(e)}")    
+    
+@app.post("/agents/recommend", summary="Get top Agent recommendations for an incident")
+async def get_agent_recommendations(request: AgentRecommendationRequest):
+    """
+     Performs vector search (with optional feedback re-ranking) to find
+     the top 3 relevant Agents for a given incident description.
+     For the Agent Trainer, thresholds are ignored during filtering.
+     Returns recommendations along with the configured search thresholds for display.
+    """
+    logger.info(f"Received recommendation request for: '{request.short_description[:50]}...'")
+    # Separate short description and full description
+    short_desc = request.short_description
+    full_desc = request.description
+    if not short_desc and not full_desc: # Need at least one
+         raise HTTPException(status_code=400, detail="Short description or description must be provided.")
+
+    try:
+        # --- MODIFICATION: Call async search with apply_threshold=False ---
+        results = await search_sop_by_query(
+            short_desc, # Pass short description
+            full_desc,  # Pass full description
+            top_k=3,
+            apply_threshold=False # <<< Ensures results aren't filtered by score
+        )
+
+        # Get current thresholds to return to the UI for display
+        thresholds = load_search_thresholds()
+
+        logger.info(f"Returning {len(results)} recommendations (thresholds ignored).")
+
+        return JSONResponse(content={
+            "recommendations": results,
+            "thresholds": thresholds # Send thresholds for UI display
+        }, status_code=200)
+
+    except Exception as e:
+        logger.exception("🔥 Error during Agent recommendation search")
+        raise HTTPException(status_code=500, detail=f"An error occurred during search: {str(e)}")
+
+# --- NEW ENDPOINT: Submit Retrieval Feedback ---
+@app.post("/feedback/retrieval", summary="Submit user feedback on Agent retrieval")
+async def submit_retrieval_feedback(request: RetrievalFeedbackRequest):
+    """Stores user feedback about Agent retrieval accuracy in the database and updates cache."""
+    logger.info(f"Received retrieval feedback: Type='{request.user_feedback_type}', Recommended='{request.recommended_agent_title or 'N/A'}'")
+
+    session_id = request.session_id or str(uuid.uuid4())
+
+    # --- CORRECTED CALL: Directly await the async function ---
+    success = await add_retrieval_feedback(
+    # await asyncio.to_thread( # <<< REMOVE THIS LINE
+        # add_retrieval_feedback, # <<< REMOVE THIS LINE
+        incident_short_description=request.incident_short_description,
+        incident_description=request.incident_description,
+        recommended_agent_id=request.recommended_agent_id,
+        recommended_agent_title=request.recommended_agent_title,
+        search_score=request.search_score,
+        user_feedback_type=request.user_feedback_type,
+        correct_agent_id=request.correct_agent_id,
+        correct_agent_title=request.correct_agent_title,
+        incident_number=request.incident_number,
+        session_id=session_id
+    )
+    # --- END CORRECTION ---
+
+    if success:
+        return JSONResponse(content={"message": "Feedback submitted successfully.", "session_id": session_id}, status_code=201)
+    else:
+        # Consider more specific error logging if possible from add_retrieval_feedback
+        raise HTTPException(status_code=500, detail="Failed to store feedback in the database.")
+
+
+# --- NEW ENDPOINT: Get Search Thresholds ---
+@app.get("/search/thresholds", summary="Get current search score thresholds")
+def get_search_thresholds():
+    """Returns the currently configured search thresholds."""
+    try:
+        thresholds = load_search_thresholds()
+        return JSONResponse(content=thresholds, status_code=200)
+    except Exception as e:
+        logger.exception("🔥 Error fetching search thresholds")
+        raise HTTPException(status_code=500, detail="Failed to load search thresholds.")
+    
+@app.get("/learning/feedback-report", summary="Get a comprehensive report on agent feedback")
+def get_feedback_report():
+    """
+    Analyzes the retrieval_feedback table and returns a structured report.
+    """
+    try:
+        report = analyze_feedback_data()
+        return JSONResponse(content=report, status_code=200)
+    except Exception as e:
+        logger.error("Failed to generate feedback report", exc_info=True)
+        raise HTTPException(status_code=500, detail=f"Failed to generate report: {str(e)}")
+
+
+@app.post("/learning/populate-cache", summary="Pre-populate Redis cache with high-confidence mappings")
+async def run_cache_population(background_tasks: BackgroundTasks):
+    """
+    Triggers a background task for cache population and returns a task ID for status polling.
+    """
+    task_id = str(uuid.uuid4())
+    task_statuses[task_id] = {"status": "starting", "progress": 0, "total": 0}
+    background_tasks.add_task(populate_cache_from_feedback, task_id, task_statuses)
+    return JSONResponse(content={"message": "Redis cache pre-population task started.", "task_id": task_id}, status_code=202)
+
+
+@app.get("/learning/task-status/{task_id}", summary="Get the status of a background task")
+def get_task_status(task_id: str):
+    """
+    Poll this endpoint to get the progress of a background task like cache population.
+    """
+    status = task_statuses.get(task_id)
+    if not status:
+        raise HTTPException(status_code=404, detail="Task ID not found.")
+    return JSONResponse(content=status)
+
+
+@app.post("/learning/fine-tune-model", summary="Trigger the model fine-tuning pipeline")
+async def run_model_finetuning(background_tasks: BackgroundTasks):
+    """
+    Triggers a (simulated) background task to fine-tune the embedding model.
+    """
+    background_tasks.add_task(trigger_model_finetuning)
+    return JSONResponse(content={"message": "Model fine-tuning pipeline has been started in the background."}, status_code=202)
