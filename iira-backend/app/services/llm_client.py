@@ -12,9 +12,9 @@ logger = logging.getLogger(__name__)
 
 # Default models to use for different tasks
 DEFAULT_MODELS = {
-    "plan": "llama3:latest",
-    "param_extraction": "llama3:latest",
-    "sop_parser": "llama3:latest"
+    "plan": "llama3.1:8b",
+    "param_extraction": "llama3.1:8b",
+    "sop_parser": "llama3.1:8b"
 }
 
 # Default models (can be overridden by environment variables)
@@ -341,74 +341,219 @@ def get_clarifying_questions_from_llm(problem_description: str) -> Dict:
     logger.info(f"✅ LLM analysis complete. Found {len(parsed_json['questions'])} questions.")
     return parsed_json
 
-def generate_script_from_context_llm(sop_context: Dict) -> Dict:
+def generate_script_from_context_llm(sop_context: Dict, model: str = settings.model_sop_parser) -> Dict:
     """
-    Generates a complete, structured script object from the context of an SOP draft.
+    Generates a complete, structured worker task object from the context of an Agent (SOP) draft.
+    Includes few-shot examples to guide LLaMA 3.1 in producing fully structured JSON outputs.
     """
     # Unpack the context for the prompt
-    title = sop_context.get("title")
-    issue = sop_context.get("issue")
+    title = sop_context.get("title", "N/A")
+    issue = sop_context.get("issue", "N/A")
     all_steps = "\n".join([f"- {step}" for step in sop_context.get("steps", [])])
-    target_step = sop_context.get("target_step_description")
+    target_step = sop_context.get("target_step_description", "N/A")
+
+    # Few-shot examples remain the same as they demonstrate the desired output structure
+    few_shot_examples = r'''
+    ### Example Output 1
+    ```json
+    {
+      "name": "Check Disk Space",
+      "description": "Verifies available disk space on the target host and alerts if below threshold.",
+      "content": "#!/bin/bash\nTHRESHOLD=${THRESHOLD:-80} # Default threshold if not provided\nTARGET_PATH=${TARGET_PATH:-/} # Default path if not provided\nUSAGE=$(df -h $TARGET_PATH | awk 'NR==2 {print $5}' | sed 's/%//')\nif [[ -z \"$USAGE\" ]]; then\n  echo \"Error retrieving disk usage for $TARGET_PATH.\"\n  exit 2\nfi\nif [ $USAGE -ge $THRESHOLD ]; then\n  echo \"CRITICAL: Disk usage on $TARGET_PATH is ${USAGE}% (Threshold: ${THRESHOLD}%).\"\n  exit 1\nelse\n  echo \"OK: Disk usage on $TARGET_PATH is ${USAGE}% (Threshold: ${THRESHOLD}%).\"\n  exit 0\nfi",
+      "params": [
+        {
+          "param_name": "TARGET_PATH",
+          "param_type": "string",
+          "required": false,
+          "default_value": "/"
+        },
+        {
+          "param_name": "THRESHOLD",
+          "param_type": "integer",
+          "required": false,
+          "default_value": "80"
+        }
+      ]
+    }
+    ```
+
+    ### Example Output 2
+    ```json
+    {
+      "name": "Restart Web Server",
+      "description": "Safely restarts the specified web server service and verifies its status.",
+      "content": "#!/bin/bash\nSERVICE_NAME=${SERVICE_NAME:-nginx}\necho \"Attempting to restart service: $SERVICE_NAME...\"\nsudo systemctl restart \"$SERVICE_NAME\"\nRESTART_CODE=$?\nsleep 3 # Allow time for service to potentially fail\necho \"Checking status of service: $SERVICE_NAME...\"\nif sudo systemctl is-active --quiet \"$SERVICE_NAME\"; then\n  echo \"OK: Service '$SERVICE_NAME' is active.\"\n  exit 0\nelse\n  echo \"CRITICAL: Service '$SERVICE_NAME' failed to start or is inactive after restart attempt (Exit code: $RESTART_CODE).\"\n  sudo systemctl status \"$SERVICE_NAME\" --no-pager\n  exit 1\nfi",
+      "params": [
+        {
+          "param_name": "SERVICE_NAME",
+          "param_type": "string",
+          "required": true,
+          "default_value": "nginx"
+        }
+      ]
+    }
+    ```
+
+    ### Example Output 3
+    ```json
+    {
+      "name": "Validate Database Connection",
+      "description": "Checks if a database is reachable using provided host and port.",
+      "content": "#!/bin/bash\nHOST=${DB_HOST}\nPORT=${DB_PORT:-5432}\nTIMEOUT=5 # Connection timeout in seconds\necho \"Checking connection to $HOST on port $PORT...\"\nif nc -zv -w $TIMEOUT \"$HOST\" \"$PORT\"; then\n  echo \"OK: Database connection successful to $HOST:$PORT.\"\n  exit 0\nelse\n  echo \"CRITICAL: Unable to connect to database at $HOST:$PORT within ${TIMEOUT}s.\"\n  exit 1\nfi",
+      "params": [
+        {
+          "param_name": "DB_HOST",
+          "param_type": "string",
+          "required": true,
+          "default_value": null
+        },
+        {
+          "param_name": "DB_PORT",
+          "param_type": "integer",
+          "required": false,        # Made optional as default is provided
+          "default_value": "5432" # Provide default as string, script can handle conversion if needed
+        }
+      ]
+    }
+    ```
+    '''
 
     prompt = f"""
-    You are an expert DevOps engineer and a master scriptwriter. Your task is to author a complete, production-ready shell script based on the context of a Standard Operating Procedure (SOP) and a specific step.
+    You are **"DevOps Architect X"**, a world-class DevOps engineer and master script author specializing in creating automated, production-grade shell scripts for enterprise systems based on Standard Operating Procedures (SOPs).
+
+    **Your Task:** Generate **only a single valid JSON object** that defines a complete worker task (shell script) designed to automate the **"Target Step"** described below, using the overall Agent (SOP) details for context.
+
+    ---
+    **Reference Examples (DO NOT COPY VERBATIM, USE FOR STRUCTURE ONLY):**
+    {few_shot_examples}
+    ---
+    **Context for Task Generation:**
+
+    **Agent (SOP) Details:**
+    * **Title:** {title}
+    * **Issue:** {issue}
+    * **All Steps:**
+    {all_steps}
+
+    **Target Step to Automate:**
+    * "{target_step}"
+    ---
+    **Output Format (MANDATORY - Respond with ONLY the JSON object):**
+    ```json
+    {{
+      "name": "string (Human-readable action, e.g., 'Check Disk Space')",
+      "description": "string (One-sentence summary)",
+      "content": "string (Full #!/bin/bash script, single line, newlines as \\n)",
+      "params": [
+        {{
+          "param_name": "string (UPPERCASE, e.g., 'SERVICE_NAME')",
+          "param_type": "string (string | integer | boolean)",
+          "required": "boolean",
+          "default_value": "string | integer | boolean | null"
+        }}
+      ]
+    }}
+    ```
+    ---
+    **Rules & Guidelines:**
+    * **Naming Rule:** The `"name"` must be human-readable and describe the action (e.g., "Restart Web Server", "Check Database Connection"). **Do NOT include file extensions like '.sh'.**
+    * **Parameters:** Identify variables in the **target step** needing external input. List them in `"params"`. Use UPPERCASE names. If none needed, use `"params": []`.
+    * **Defaults:** Add `default_value` only if a sensible default exists (use correct type or `null`). Mark `required: false` if a default is provided.
+    * **Content:** Write a robust `#!/bin/bash` script. Use parameters like `${{PARAM_NAME:-default}}`. Include basic error checking and informative echo statements. Ensure newlines are `\\n`.
+    * **Idempotency:** Make the script safe to run multiple times where possible.
+    * **Security:** Avoid hardcoding credentials. Use parameters for sensitive data if necessary (though ideally managed externally). Use `sudo` explicitly if needed for commands.
+    * **Output:** The *entire* response must be *only* the JSON object specified. No introductory text, explanations, or markdown fences around the final JSON.
+    ---
+    **Generation Process:**
+    1.  Analyze the "Target Step" within the context of the "Agent Details".
+    2.  Determine the specific action(s) the script should perform.
+    3.  Identify necessary parameters and sensible defaults.
+    4.  Write the `#!/bin/bash` script, ensuring correctness and safety.
+    5.  Format the script content with escaped newlines (`\\n`).
+    6.  Construct the final JSON object according to the specified format.
+    7.  Output **only** the JSON object.
+
+    **JSON Output:**
+    """
+
+    logger.info("🤖 Calling LLM to generate a new worker task from Agent context...")
+    response_text = call_ollama(prompt, model=model) # Use model from arg
+    logger.debug("LLM Response (Worker Task Generation from Context): %s", response_text)
+
+    parsed_json = extract_json_from_text(response_text)
+
+    # Validate the structure
+    if not isinstance(parsed_json, dict) or not all(k in parsed_json for k in ["name", "description", "content", "params"]):
+        logger.error(f"Invalid JSON structure received from LLM for context-based task generation. Response: {response_text}")
+        raise ValueError("Invalid or incomplete JSON response from LLM: Missing required keys or not a dict.")
+    if not isinstance(parsed_json.get("params"), list):
+        logger.error(f"Invalid 'params' field in LLM response (not a list). Response: {response_text}")
+        raise ValueError("Invalid response from LLM: 'params' field must be a list.")
+
+    # Additional validation for params structure
+    for param in parsed_json.get("params", []):
+         if not isinstance(param, dict) or not all(k in param for k in ["param_name", "param_type", "required"]):
+              logger.error(f"Invalid parameter structure within 'params' list. Param: {param}. Response: {response_text}")
+              raise ValueError("Invalid response from LLM: Malformed item in 'params' list.")
+
+    logger.info(f"✅ Successfully generated worker task draft: '{parsed_json.get('name')}'")
+    return parsed_json
+
+
+def generate_script_from_description_llm(description: str) -> Dict:
+    """
+    Generates a complete, structured worker task object from a single description string.
+    """
+    prompt = f"""
+    You are an expert DevOps engineer and a master scriptwriter. Your task is to author a complete, production-ready shell script based *only* on the user's description of what the script should do.
 
     Your output MUST be a single, valid JSON object with no other text or explanations.
 
-    **Full SOP Context:**
-    - **Title:** {title}
-    - **Issue:** {issue}
-    - **All Steps:**
-    {all_steps}
-
-    **Your Target:**
-    Your goal is to create a script that automates the following specific step:
-    - **Target Step:** "{target_step}"
+    **User's Worker Task Description:**
+    "{description}"
 
     **Instructions:**
-    Based on all the information above, generate a JSON object with the following structure:
+    Based on the description above, generate a JSON object with the following structure:
     {{
-      "name": "string (a descriptive, short name for the script, e.g., 'check-disk-space.sh')",
-      "description": "string (a clear, one-sentence description of what the script does)",
+      "name": "string (a descriptive, human-readable name for the task, e.g., 'Check Disk Space')",
+      "description": "string (this should be the same as the user's provided description)",
       "content": "string (the full #!/bin/bash script content, formatted as a SINGLE-LINE JSON string with all newlines properly escaped as \\n)",
       "params": [
         {{
           "param_name": "string (e.g., 'HOSTNAME')",
           "param_type": "string (e.g., 'string', 'integer', 'boolean')",
-          "required": "boolean (true if the script cannot run without this parameter)"
+          "required": "boolean (true if the script cannot run without this parameter)",
+          "default_value": "string | null (optional default value)"
         }}
       ]
     }}
 
+    **Naming Rule:**
+    - The "name" should be human-readable and describe the action (e.g., "Restart Web Server", "Check Database Connection"). Do NOT include file extensions like '.sh'.
+
     **Parameter Rules:**
-    - Identify any variables in the target step that would need to be passed as arguments to the script. These are your parameters.
+    - Identify any variables *implied* or *likely needed* based on the description that would need to be passed as arguments to the script. These are your parameters.
     - Use clear, uppercase parameter names (e.g., 'TARGET_DIRECTORY', 'SERVICE_NAME').
+    - If no parameters seem necessary based on the description, provide an empty array: "params": []
+    - Add a `default_value` only if it makes obvious sense (e.g., a default path or flag). Otherwise, omit it or set to null.
 
     **Final JSON Output:**
     """
-    
-    logger.info("🤖 Calling LLM to generate a new script from SOP context...")
+
+    logger.info("🤖 Calling LLM to generate a new worker task from a simple description...")
     response_text = call_ollama(prompt, model=settings.model_sop_parser)
-    logger.debug("LLM Response (Script Generation): %s", response_text)
-    
-    # Use a regular expression to find the JSON block, ignoring surrounding text
-    json_match = re.search(r'\{.*\}', response_text, re.DOTALL)
-    if not json_match:
-        logger.error(f"No JSON object found in LLM response. Raw output: {response_text}")
-        raise ValueError("Invalid or incomplete JSON response from LLM: No JSON object found.")
+    logger.debug("LLM Response (Simple Worker Task Generation): %s", response_text)
 
-    json_string = json_match.group(0)
-    
-    try:
-        # The JSON from the LLM should now be valid thanks to the improved prompt
-        parsed_json = json.loads(json_string)
-    except json.JSONDecodeError as e:
-        logger.error(f"Failed to parse extracted JSON string. Error: {e}. String: {json_string}")
-        raise ValueError("Invalid or incomplete JSON response from LLM: Failed to parse JSON.")
+    parsed_json = extract_json_from_text(response_text)
 
-    if not all(k in parsed_json for k in ["name", "description", "content", "params"]):
-        raise ValueError("Invalid or incomplete JSON response from LLM during script generation: Missing required keys.")
-    
-    logger.info(f"✅ Successfully generated script draft: '{parsed_json.get('name')}'")
+    # Validate the structure
+    if not isinstance(parsed_json, dict) or not all(k in parsed_json for k in ["name", "description", "content", "params"]):
+        logger.error(f"Invalid JSON structure received from LLM for simple script generation. Response: {response_text}")
+        raise ValueError("Invalid or incomplete JSON response from LLM: Missing required keys or not a dict.")
+    if not isinstance(parsed_json.get("params"), list):
+         logger.error(f"Invalid 'params' field in LLM response (not a list). Response: {response_text}")
+         raise ValueError("Invalid response from LLM: 'params' field must be a list.")
+
+
+    logger.info(f"✅ Successfully generated worker task draft: '{parsed_json.get('name')}'")
     return parsed_json

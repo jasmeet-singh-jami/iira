@@ -3,46 +3,49 @@
 @tailwind components;
 @tailwind utilities;
 
-/* You can still add your own custom CSS here if needed. */
-.App {
-  text-align: center;
+/* General body styles for better typography and background */
+body {
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+  background-color: #f9fafb; /* A slightly off-white gray */
 }
 
-.App {
-  text-align: center;
+/* Custom scrollbar for a more modern look */
+::-webkit-scrollbar {
+  width: 8px;
+  height: 8px;
 }
 
-.App-logo {
-  height: 40vmin;
-  pointer-events: none;
+::-webkit-scrollbar-track {
+  background: #f1f1f1;
+  border-radius: 10px;
 }
 
-@media (prefers-reduced-motion: no-preference) {
-  .App-logo {
-    animation: App-logo-spin infinite 20s linear;
-  }
+::-webkit-scrollbar-thumb {
+  background: #d1d5db; /* A light gray */
+  border-radius: 10px;
 }
 
-.App-header {
-  background-color: #282c34;
-  min-height: 100vh;
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  justify-content: center;
-  font-size: calc(10px + 2vmin);
-  color: white;
+::-webkit-scrollbar-thumb:hover {
+  background: #9ca3af; /* A slightly darker gray on hover */
 }
 
-.App-link {
-  color: #61dafb;
+/* Ensure the main app container takes up the full height */
+#root, .App {
+  height: 100%;
 }
 
-@keyframes App-logo-spin {
-  from {
-    transform: rotate(0deg);
-  }
-  to {
-    transform: rotate(360deg);
-  }
+/* Custom transition for sidebar width */
+.transition-width {
+  transition-property: width;
+}
+
+/* React Flow Customizations */
+.react-flow .react-flow__handle {
+  width: 8px;
+  height: 8px;
+}
+
+.react-flow .react-flow__controls {
+  box-shadow: 0 0 10px rgba(0,0,0,0.1);
 }

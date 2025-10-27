@@ -33,25 +33,25 @@ export const uploadSOPApi = async (sopData) => {
     }
 };
 
-/**
- * Resolves an incident by fetching relevant SOPs and scripts.
- * This function is specifically for the "Test Bed" and will not log to history.
- * @param {string} incidentNumber - The number of the incident to resolve.
- * @returns {Promise<Object>} A promise that resolves to the incident resolution data.
- */
-export const resolveIncidentApi = async (incidentNumber) => {
-    try {
-        const response = await axios.get(`${API_BASE}/api/incident/${incidentNumber}`, {
-            params: {
-                source: 'test_bed'
-            }
-        });
-        return response.data;
-    } catch (error) {
-        console.error("API Error: Incident resolution failed:", error);
-        throw new Error('Incident resolution failed. Please try again or check the incident number.');
-    }
-};
+// /**
+//  * Resolves an incident by fetching relevant SOPs and scripts.
+//  * This function is specifically for the "Test Bed" and will not log to history.
+//  * @param {string} incidentNumber - The number of the incident to resolve.
+//  * @returns {Promise<Object>} A promise that resolves to the incident resolution data.
+//  */
+// export const resolveIncidentApi = async (incidentNumber) => {
+//     try {
+//         const response = await axios.get(`${API_BASE}/api/incident/${incidentNumber}`, {
+//             params: {
+//                 source: 'test_bed'
+//             }
+//         });
+//         return response.data;
+//     } catch (error) {
+//         console.error("API Error: Incident resolution failed:", error);
+//         throw new Error('Incident resolution failed. Please try again or check the incident number.');
+//     }
+// };
 
 /**
  * Executes a specific script on the backend.
@@ -232,5 +232,134 @@ export const generateScriptFromContextApi = async (context) => {
         console.error("API Error: Error generating script from context:", error);
         const errorMessage = error.response?.data?.detail || 'Failed to generate script with AI. Please check the API server.';
         throw new Error(errorMessage);
+    }
+};
+
+export const fetchAgentStatusApi = async () => {
+    try {
+        const response = await axios.get(`${API_BASE}/api/agent/status`);
+        return response.data;
+    } catch (error) {
+        console.error("API Error: Error fetching agent status:", error);
+        throw new Error('Failed to fetch agent status.');
+    }
+};
+
+export const generateScriptSimpleApi = async (description) => {
+    try {
+        const response = await axios.post(`${API_BASE}/api/scripts/generate_simple`, { description });
+        return response.data;
+    } catch (error) {
+        console.error("API Error: Error generating simple script:", error);
+        const errorMessage = error.response?.data?.detail || 'Failed to generate script with AI.';
+        throw new Error(errorMessage);
+    }
+};
+
+
+/**
+ * Fetches the top Agent recommendations for a given incident description.
+ * @param {string} shortDescription - The short description of the incident.
+ * @param {string} [description] - The full description (optional).
+ * @param {string} [incidentNumber] - The incident number (optional).
+ * @returns {Promise<Object>} A promise resolving to { recommendations: [], thresholds: {} }.
+ */
+export const fetchAgentRecommendationsApi = async (shortDescription, description = null, incidentNumber = null) => {
+    try {
+        const payload = {
+            short_description: shortDescription,
+            description: description,
+            incident_number: incidentNumber,
+        };
+        const response = await axios.post(`${API_BASE}/api/agents/recommend`, payload);
+        // Ensure recommendations is always an array
+        return {
+            recommendations: response.data.recommendations || [],
+            thresholds: response.data.thresholds || {}
+        };
+    } catch (error) {
+        console.error("API Error: Failed to fetch Agent recommendations:", error);
+        const errorMessage = error.response?.data?.detail || 'Failed to get Agent recommendations.';
+        throw new Error(errorMessage);
+    }
+};
+
+/**
+ * Submits user feedback on the accuracy of Agent retrieval.
+ * @param {Object} feedbackData - The feedback details.
+ * @param {string} feedbackData.incident_short_description
+ * @param {string|null} feedbackData.incident_description
+ * @param {string|null} feedbackData.incident_number
+ * @param {string|null} feedbackData.recommended_agent_id
+ * @param {string|null} feedbackData.recommended_agent_title
+ * @param {number|null} feedbackData.search_score
+ * @param {string} feedbackData.user_feedback_type - 'Correct' or 'Incorrect'
+ * @param {string|null} feedbackData.correct_agent_id - ID selected by user if incorrect
+ * @param {string|null} feedbackData.correct_agent_title - Title selected by user if incorrect
+ * @param {string|null} feedbackData.session_id - Optional session identifier
+ * @returns {Promise<Object>} A promise resolving to the API response { message, session_id }.
+ */
+export const submitRetrievalFeedbackApi = async (feedbackData) => {
+    try {
+        const response = await axios.post(`${API_BASE}/api/feedback/retrieval`, feedbackData);
+        return response.data; // Should include { message, session_id }
+    } catch (error) {
+        console.error("API Error: Failed to submit retrieval feedback:", error);
+        const errorMessage = error.response?.data?.detail || 'Failed to submit feedback.';
+        throw new Error(errorMessage);
+    }
+};
+
+/**
+ * Fetches the current search score thresholds from the backend.
+ * @returns {Promise<Object>} A promise resolving to the thresholds object (e.g., { INITIAL_SEARCH_THRESHOLD: 0.55 }).
+ */
+export const fetchSearchThresholdsApi = async () => {
+    try {
+        const response = await axios.get(`${API_BASE}/api/search/thresholds`);
+        return response.data || {}; // Return empty object if data is missing
+    } catch (error) {
+        console.error("API Error: Failed to fetch search thresholds:", error);
+        throw new Error('Failed to load search thresholds.');
+    }
+};
+
+export const fetchFeedbackReportApi = async () => {
+    try {
+        const response = await axios.get(`${API_BASE}/api/learning/feedback-report`);
+        return response.data;
+    } catch (error) {
+        console.error("API Error: Failed to fetch feedback report:", error);
+        throw new Error(error.response?.data?.detail || 'Failed to generate feedback report.');
+    }
+};
+
+export const populateCacheApi = async () => {
+    try {
+        const response = await axios.post(`${API_BASE}/api/learning/populate-cache`);
+        return response.data;
+    } catch (error) {
+        console.error("API Error: Failed to trigger cache population:", error);
+        throw new Error(error.response?.data?.detail || 'Failed to start cache population task.');
+    }
+};
+
+export const triggerModelFinetuningApi = async () => {
+    try {
+        const response = await axios.post(`${API_BASE}/api/learning/fine-tune-model`);
+        return response.data;
+    } catch (error) {
+        console.error("API Error: Failed to trigger model fine-tuning:", error);
+        throw new Error(error.response?.data?.detail || 'Failed to start model fine-tuning task.');
+    }
+};
+
+export const fetchTaskStatusApi = async (taskId) => {
+    try {
+        const response = await axios.get(`${API_BASE}/api/learning/task-status/${taskId}`);
+        return response.data; // Returns { status, progress, total, message }
+    } catch (error) {
+        console.error("API Error: Failed to fetch task status:", error);
+        throw new Error(error.response?.data?.detail || 'Failed to get task status.');
     }
 };

@@ -47,7 +47,7 @@ const SearchableDropdown = ({ options, value, onChange, placeholder }) => {
               </span>
               <input
                 type="text"
-                placeholder="Search scripts..."
+                placeholder="Search tasks..." // Updated placeholder
                 value={searchTerm}
                 onChange={(e) => setSearchTerm(e.target.value)}
                 className="w-full py-2 pl-10 pr-4 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500"
@@ -70,7 +70,7 @@ const SearchableDropdown = ({ options, value, onChange, placeholder }) => {
                 </li>
               ))
             ) : (
-              <li className="px-4 py-2 text-gray-500">No scripts found</li>
+              <li className="px-4 py-2 text-gray-500">No tasks found</li> // Updated text
             )}
           </ul>
         </div>
