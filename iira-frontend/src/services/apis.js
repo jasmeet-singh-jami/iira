@@ -347,7 +347,7 @@ export const populateCacheApi = async () => {
 export const triggerModelFinetuningApi = async () => {
     try {
         const response = await axios.post(`${API_BASE}/api/learning/fine-tune-model`);
-        return response.data;
+        return response.data; // Returns { message, task_id }
     } catch (error) {
         console.error("API Error: Failed to trigger model fine-tuning:", error);
         throw new Error(error.response?.data?.detail || 'Failed to start model fine-tuning task.');
@@ -361,5 +361,35 @@ export const fetchTaskStatusApi = async (taskId) => {
     } catch (error) {
         console.error("API Error: Failed to fetch task status:", error);
         throw new Error(error.response?.data?.detail || 'Failed to get task status.');
+    }
+};
+
+export const triggerReEmbeddingApi = async (modelPath) => {
+    try {
+        const response = await axios.post(`${API_BASE}/api/learning/re-embed-agents`, { model_path: modelPath });
+        return response.data; // Returns { message, task_id }
+    } catch (error) {
+        console.error("API Error: Failed to trigger re-embedding:", error);
+        throw new Error(error.response?.data?.detail || 'Failed to start re-embedding task.');
+    }
+};
+
+export const fetchModelsApi = async () => {
+    try {
+        const response = await axios.get(`${API_BASE}/api/learning/models`);
+        return response.data.models || [];
+    } catch (error) {
+        console.error("API Error: Failed to fetch models:", error);
+        throw new Error('Failed to load model list.');
+    }
+};
+
+export const deleteModelApi = async (modelName) => {
+    try {
+        const response = await axios.delete(`${API_BASE}/api/learning/models/${modelName}`);
+        return response.data;
+    } catch (error) {
+        console.error("API Error: Failed to delete model:", error);
+        throw new Error(error.response?.data?.detail || 'Failed to delete model.');
     }
 };

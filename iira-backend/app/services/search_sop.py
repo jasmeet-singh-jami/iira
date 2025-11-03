@@ -7,12 +7,13 @@ import logging
 import asyncio # Import asyncio
 from app.utils.redis_client import get_redis_key_for_incident, get_feedback_summary # Import Redis utils
 from typing import List, Dict, Optional # Import List, Dict, Optional
+from app.services.settings_service import load_setting
 
 logger = logging.getLogger(__name__)
 
 # --- Load thresholds dynamically ---
 SEARCH_THRESHOLDS = load_search_thresholds()
-MODEL_PATH = "/app/ml_models/all-MiniLM-L6-v2"
+MODEL_PATH = load_setting("EMBEDDING_MODEL_PATH")
 COLLECTION_NAME = "sop_documents"
 # Fetch more results initially for re-ranking pool
 INITIAL_FETCH_K = 10 # Fetch top 10 for re-ranking
