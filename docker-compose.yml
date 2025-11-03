@@ -2,7 +2,7 @@ services:
   frontend:
     build:
       context: ./iira-frontend
-    image: iira/iira-frontend:2.7
+    image: iira/iira-frontend:2.8
     container_name: react-frontend
     ports:
       # Map the local port 3000 to the container's port 80 (where Nginx is running)
@@ -12,12 +12,14 @@ services:
     build:
       context: .                          
       dockerfile: iira-backend/Dockerfile 
-    image: iira/iira-backend:2.2
+    image: iira/iira-backend:2.6
     container_name: python-backend
     ports:
       - "8000:8000"
     env_file:
       - ./iira-backend/.env.docker
+    volumes:
+      - ml_models_data:/app/ml_models
 
   postgres:
     image: postgres:15
@@ -75,3 +77,4 @@ volumes:
   qdrant_storage:
   # ollama_models:
   redis_data:
+  ml_models_data:

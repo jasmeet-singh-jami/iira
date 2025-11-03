@@ -8,6 +8,7 @@ import uuid
 from app.services.scripts import get_scripts_from_db
 from typing import List, Dict
 import logging
+from app.services.settings_service import load_setting
 
 logger = logging.getLogger(__name__)
 
@@ -17,7 +18,7 @@ qdrant_client = QdrantClient(
     port=settings.qdrant_port,
 )
 
-MODEL_PATH = "/app/ml_models/all-MiniLM-L6-v2"
+MODEL_PATH = load_setting("EMBEDDING_MODEL_PATH")
 # --- MODIFICATION: Define collection names as constants ---
 SOP_COLLECTION_NAME = "sop_documents"
 SCRIPT_COLLECTION_NAME = "available_scripts"

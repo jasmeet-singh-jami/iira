@@ -42,11 +42,15 @@ from app.services.llm_client import (
     generate_script_from_description_llm
 )
 
-from fastapi import BackgroundTasks
+from fastapi import BackgroundTasks, Body
 from app.services.long_term_learning import (
     analyze_feedback_data,
     populate_cache_from_feedback,
-    trigger_model_finetuning
+    trigger_model_finetuning,
+    monitor_task_status,
+    trigger_re_embedding ,
+    get_model_management_info,
+    delete_inactive_model
 )
 
 from app.services.settings_service import load_search_thresholds
@@ -604,11 +608,27 @@ async def get_agent_recommendations(request: AgentRecommendationRequest):
      For the Agent Trainer, thresholds are ignored during filtering.
      Returns recommendations along with the configured search thresholds for display.
     """
-    logger.info(f"Received recommendation request for: '{request.short_description[:50]}...'")
-    # Separate short description and full description
+    incident_num = request.incident_number
     short_desc = request.short_description
     full_desc = request.description
-    if not short_desc and not full_desc: # Need at least one
+
+    # --- NEW LOGIC: Fetch details if only incident number is provided ---
+    if incident_num and not short_desc:
+        logger.info(f"Incident number {incident_num} provided. Fetching details...")
+        # fetch_incident_by_number is a synchronous function, no await needed
+        incident_data = fetch_incident_by_number(incident_num.upper())
+        
+        if not incident_data:
+            raise HTTPException(status_code=404, detail=f"Incident '{incident_num}' not found.")
+        
+        short_desc = incident_data.get("short_description")
+        full_desc = incident_data.get("description")
+        logger.info(f"Found incident. Short Desc: '{short_desc[:50]}...'")
+    # --- END NEW LOGIC ---
+
+    logger.info(f"Received recommendation request for: '{short_desc[:50]}...'")
+
+    if not short_desc and not full_desc: # Check *after* attempting to fetch
          raise HTTPException(status_code=400, detail="Short description or description must be provided.")
 
     try:
@@ -701,21 +721,50 @@ async def run_cache_population(background_tasks: BackgroundTasks):
     return JSONResponse(content={"message": "Redis cache pre-population task started.", "task_id": task_id}, status_code=202)
 
 
-@app.get("/learning/task-status/{task_id}", summary="Get the status of a background task")
-def get_task_status(task_id: str):
-    """
-    Poll this endpoint to get the progress of a background task like cache population.
-    """
-    status = task_statuses.get(task_id)
-    if not status:
-        raise HTTPException(status_code=404, detail="Task ID not found.")
-    return JSONResponse(content=status)
-
-
 @app.post("/learning/fine-tune-model", summary="Trigger the model fine-tuning pipeline")
 async def run_model_finetuning(background_tasks: BackgroundTasks):
-    """
-    Triggers a (simulated) background task to fine-tune the embedding model.
-    """
-    background_tasks.add_task(trigger_model_finetuning)
-    return JSONResponse(content={"message": "Model fine-tuning pipeline has been started in the background."}, status_code=202)
+    """Triggers the fine-tuning background process."""
+    task_id = str(uuid.uuid4())
+    background_tasks.add_task(trigger_model_finetuning, task_id, task_statuses)
+    return JSONResponse(content={"message": "Model fine-tuning process has been started.", "task_id": task_id}, status_code=202)
+
+@app.post("/learning/re-embed-agents", summary="Trigger re-embedding of all agents")
+async def run_re_embedding(background_tasks: BackgroundTasks):
+    """Triggers the agent re-embedding background process with the new model."""
+    task_id = str(uuid.uuid4())
+    background_tasks.add_task(trigger_re_embedding, task_id, task_statuses)
+    return JSONResponse(content={"message": "Agent re-embedding process has been started.", "task_id": task_id}, status_code=202)
+
+@app.get("/learning/task-status/{task_id}", summary="Get the status of a background task")
+def get_task_status(task_id: str): # <<< REMOVED background_tasks from here
+    """Poll this endpoint to get task progress."""
+    # The monitor function will read the file and update the in-memory dict
+    monitor_task_status(task_id, task_statuses)
+
+    status = task_statuses.get(task_id)
+    if not status:
+        raise HTTPException(status_code=404, detail="Task ID not found or expired.")
+    return JSONResponse(content=status)
+
+@app.get("/learning/models", summary="List all fine-tuned models")
+def list_all_models():
+    """Returns a list of all models in the ml_models directory and identifies the active one."""
+    logger.info(":::::::::::Inside list_all_models:::::::::::")
+    try:
+        models = get_model_management_info()
+        return JSONResponse(content={"models": models})
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+@app.delete("/learning/models/{model_name}", summary="Delete an inactive fine-tuned model")
+def delete_a_model(model_name: str):
+    """Deletes a model directory, but prevents deletion of the active model."""
+    try:
+        result = delete_inactive_model(model_name)
+        return JSONResponse(content=result)
+    except FileNotFoundError as e:
+        raise HTTPException(status_code=404, detail=str(e))
+    except ValueError as e: # For trying to delete the active model
+        raise HTTPException(status_code=400, detail=str(e))
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))

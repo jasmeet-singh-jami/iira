@@ -42,7 +42,11 @@ COPY --from=builder /install /usr/local
 COPY ./iira-backend/ /app/
 COPY ./scripts/ /app/scripts/
 
-# Copy the downloaded model files into the image ---
+# Create a safe, non-volume location for the base model
+RUN mkdir /app/base_model
+COPY ./iira-backend/ml_models/all-MiniLM-L6-v2 /app/base_model/all-MiniLM-L6-v2
+
+# Copy the downloaded model files into the image
 COPY ./iira-backend/ml_models/ /app/ml_models/
 
 # Ensure shell scripts are executable

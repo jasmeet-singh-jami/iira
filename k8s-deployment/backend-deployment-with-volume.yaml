@@ -1,0 +1,48 @@
+# 1. Namespace (Optional if created by redis-deployment.yaml)
+
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: backend-deployment # Using your original deployment name
+  namespace: iira
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: backend # Using your original label selector
+  template:
+    metadata:
+      labels:
+        app: backend # Using your original label
+    spec:
+      containers:
+      - name: backend
+		image: registry.example.com:5000/iira/iira-backend:2.3
+        ports:
+        - containerPort: 8000
+        envFrom:
+        - configMapRef:
+            name: iira-backend-config # Refers to the ConfigMap applied separately
+        volumeMounts:
+        - name: ml-models-data
+          mountPath: /app/ml_models # Mount the persistent volume for models
+      volumes:
+      - name: ml-models-data
+        persistentVolumeClaim:
+          claimName: iira-ml-models-pvc
+---
+# 5. Backend Service
+# Exposes the backend API internally within the cluster.
+apiVersion: v1
+kind: Service
+metadata:
+  name: backend-service
+  namespace: iira
+spec:
+  selector:
+    app: backend
+  ports:
+  - protocol: TCP
+    port: 8000
+    targetPort: 8000
+  type: ClusterIP # Only needs to be accessible from the frontend inside the cluster

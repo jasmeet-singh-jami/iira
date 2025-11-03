@@ -14,6 +14,8 @@ class Settings(BaseSettings):
     model_params: str
     model_sop_parser: str
 
+    embedding_model_path: str = "/app/base_model/all-MiniLM-L6-v2"
+
     # --- Redis Settings ---
     redis_host: str = "redis" # Default to Docker service name
     redis_port: int = 6379
