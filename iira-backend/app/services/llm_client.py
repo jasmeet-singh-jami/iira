@@ -1,4 +1,3 @@
-# iira/app/services/llm_client.py
 import json
 import requests
 import time
@@ -6,6 +5,7 @@ import re
 import logging
 from typing import List, Dict, Any
 from app.config import settings
+from fastapi import HTTPException
 
 # Configure logger
 logger = logging.getLogger(__name__)
@@ -24,11 +24,9 @@ MODEL_PARAMS = settings.model_params
 MODEL_SOP_PARSER = settings.model_sop_parser
 MODEL_SOP_GENERATOR = settings.model_sop_parser
 
-import re
-import json
-import logging
-
-logger = logging.getLogger(__name__)
+# -------------------------------------------------------------------
+# CORE UTILITIES
+# -------------------------------------------------------------------
 
 def call_ollama(prompt: str, model: str) -> str:
     """
@@ -61,61 +59,230 @@ def call_ollama(prompt: str, model: str) -> str:
                 return ""
     return ""
 
-
 def extract_json_from_text(text: str) -> Dict:
-    """
-    Safely extract the first JSON object from a string.
-    """
+    """Strictly extracts the first valid JSON object from the text."""
     try:
-        json_start = text.find('{')
-        json_end = text.rfind('}')
-        if json_start != -1 and json_end != -1:
-            return json.loads(text[json_start: json_end + 1])
-    except json.JSONDecodeError as e:
-        logger.error(f"JSON decode error: {e}")
-        logger.error("----- Text That Failed to Parse -----\n%s\n-------------------------------------", text)
-    return {}
+        start = text.index("{")
+        end = text.rindex("}")
+        json_str = text[start:end+1]
+        return json.loads(json_str)
+    except Exception as e:
+        # Raise to allow auto-repair to handle it
+        raise e
 
+def auto_repair_json(text: str) -> Dict:
+    """Attempts to repair common JSON errors from LLMs."""
+    logger.info("Attempting JSON auto-repair...")
+    try:
+        start = text.find("{")
+        end = text.rindex("}")
+        if start == -1 or end == -1:
+            raise ValueError("No JSON object found.")
+        
+        candidate = text[start:end + 1]
+        # Remove non-ASCII chars
+        candidate = re.sub(r"[^\x00-\x7F]+", "", candidate)
+        # Remove trailing commas (common LLM error)
+        candidate = re.sub(r",\s*([\]}])", r"\1", candidate)
+        # Remove comments
+        candidate = re.sub(r"//.*?\n", "", candidate)
+        
+        return json.loads(candidate)
+    except Exception as e:
+        logger.error(f"Auto-repair failed. JSON candidate was:\n{text}")
+        raise e
+
+def extract_json(response: str) -> str:
+    """Legacy helper: Extract first JSON object string."""
+    match = re.search(r"\{.*\}", response, re.DOTALL)
+    if match:
+        return match.group(0)
+    raise ValueError("No JSON object found in response.")
+
+# -------------------------------------------------------------------
+# SOP PARSING LOGIC (FEW-SHOT)
+# -------------------------------------------------------------------
+
+FEW_SHOT_EXAMPLES = """
+### FEW-SHOT EXAMPLE 1
+Input SOP:
+Title: Restart Apache Web Server
+Steps:
+1. Check if Apache service is running.
+2. If it is not running, start the service.
+3. Verify the service status again.
+4. If verification fails, escalate to L2.
+
+Output JSON:
+{
+  "title": "Restart Apache Web Server",
+  "issue": "Resolves cases where Apache service stops responding.",
+  "nodes": [
+    { "id": "1", "type": "start", "title": "Start", "description": "", "x": 400, "y": 50 },
+    { "id": "2", "type": "action", "title": "Check Apache", "description": "Check if Apache service is running", "x": 400, "y": 180 },
+    { "id": "3", "type": "condition", "title": "Is Apache running?", "description": "Determine if service is active", "x": 400, "y": 310 },
+    { "id": "4", "type": "action", "title": "Start Apache", "description": "Start the Apache service", "x": 250, "y": 440 },
+    { "id": "5", "type": "action", "title": "Verify status", "description": "Verify the service status again", "x": 550, "y": 440 },
+    { "id": "6", "type": "condition", "title": "Verification OK?", "description": "Did verification succeed?", "x": 550, "y": 570 },
+    { "id": "7", "type": "action", "title": "Escalate", "description": "Escalate to L2", "x": 700, "y": 700 },
+    { "id": "8", "type": "end", "title": "End", "description": "", "x": 400, "y": 830 }
+  ],
+  "connections": [
+    { "from": "1", "to": "2" },
+    { "from": "2", "to": "3" },
+    { "from": "3", "to": "4", "label": "No" },
+    { "from": "3", "to": "8", "label": "Yes" },
+    { "from": "4", "to": "5" },
+    { "from": "5", "to": "6" },
+    { "from": "6", "to": "8", "label": "Yes" },
+    { "from": "6", "to": "7", "label": "No" },
+    { "from": "7", "to": "8" }
+  ]
+}
+
+### FEW-SHOT EXAMPLE 2
+Input SOP:
+Title: Database Connectivity Troubleshooting
+Steps:
+1. Check if DB host is reachable.
+2. If reachable, check if credentials are valid.
+3. If credentials invalid, reset password.
+4. If reachable and credentials valid, run connectivity test.
+5. If connectivity test fails, restart DB service.
+
+Output JSON:
+{
+  "title": "Database Connectivity Troubleshooting",
+  "issue": "Fixes common database connection failures.",
+  "nodes": [
+    { "id": "1", "type": "start", "title": "Start", "description": "", "x": 400, "y": 50 },
+    { "id": "2", "type": "action", "title": "Check Host Reachable", "description": "Verify DB host ping/reachability", "x": 400, "y": 180 },
+    { "id": "3", "type": "condition", "title": "Host reachable?", "description": "Is the DB host reachable?", "x": 400, "y": 310 },
+    { "id": "4", "type": "action", "title": "Check Credentials", "description": "Verify DB username/password", "x": 250, "y": 440 },
+    { "id": "5", "type": "condition", "title": "Credentials valid?", "description": "Are credentials correct?", "x": 250, "y": 570 },
+    { "id": "6", "type": "action", "title": "Reset Password", "description": "Reset DB credentials", "x": 100, "y": 700 },
+    { "id": "7", "type": "action", "title": "Run Connectivity Test", "description": "Verify DB connectivity", "x": 550, "y": 440 },
+    { "id": "8", "type": "condition", "title": "Test OK?", "description": "Did test pass?", "x": 550, "y": 570 },
+    { "id": "9", "type": "action", "title": "Restart DB Service", "description": "Restart DB system service", "x": 700, "y": 700 },
+    { "id": "10", "type": "end", "title": "End", "description": "", "x": 400, "y": 830 }
+  ],
+  "connections": [
+    { "from": "1", "to": "2" },
+    { "from": "2", "to": "3" },
+    { "from": "3", "to": "4", "label": "Yes" },
+    { "from": "3", "to": "10", "label": "No" },
+    { "from": "4", "to": "5" },
+    { "from": "5", "to": "6", "label": "No" },
+    { "from": "5", "to": "7", "label": "Yes" },
+    { "from": "6", "to": "10" },
+    { "from": "7", "to": "8" },
+    { "from": "8", "to": "10", "label": "Yes" },
+    { "from": "8", "to": "9", "label": "No" },
+    { "from": "9", "to": "10" }
+  ]
+}
+"""
+
+def build_optimized_prompt(document_text: str) -> str:
+    return f"""
+You are a specialized SOP-to-Workflow parser. Convert the SOP document into a fully structured JSON workflow.
+
+### OUTPUT RULES
+- Return ONLY a valid JSON object.
+- No markdown, no commentary, no explanation.
+- Must follow the exact schema.
+
+### JSON TEMPLATE
+{{
+  "title": "",
+  "issue": "",
+  "nodes": [],
+  "connections": []
+}}
+
+### EXTRACTION LOGIC
+- Convert sequential steps → "action" nodes
+- Convert decision/if/else/verify/check → "condition" nodes
+- Exactly two branches per condition: "Yes" and "No"
+- All paths must eventually reach an "end" node
+
+### POSITIONING RULES
+- Start node at (400, 50)
+- Increase Y by 130–150 per level
+- Left branch = x - 150
+- Right branch = x + 150
+
+### FEW-SHOT EXAMPLES
+{FEW_SHOT_EXAMPLES}
+
+### SOP DOCUMENT
+{document_text}
+""".strip()
+
+def get_structured_sop_from_llm(document_text: str) -> Dict:
+    """
+    Parses raw SOP text into a structured JSON workflow for the frontend.
+    Uses Few-Shot prompting + Auto-Repair for maximum reliability.
+    """
+    logger.info("Parsing SOP using Optimized Few-Shot Pipeline...")
+    
+    prompt = build_optimized_prompt(document_text)
+
+    try:
+        response_text = call_ollama(prompt, model=MODEL_SOP_PARSER)
+        if not response_text:
+            raise ValueError("Received empty response from Ollama")
+
+        logger.info(f"Raw LLM Response:\n{response_text}")
+
+        # Try strict extraction first, then fallback to repair
+        try:
+            response_json = extract_json_from_text(response_text)
+        except Exception:
+            logger.warning("Strict JSON parsing failed. Attempting auto-repair...")
+            response_json = auto_repair_json(response_text)
+        
+        logger.info(f"Parsed JSON: {json.dumps(response_json, indent=2)}")
+
+        # Add basic validation
+        if not response_json or not all(key in response_json for key in ['title', 'nodes', 'connections']):
+           logger.warning(f"Invalid workflow structure: {response_json}")
+           raise ValueError("Invalid workflow structure: Missing title, nodes, or connections")
+           
+        return response_json
+
+    except Exception as e:
+        logger.exception(f"Error in get_structured_sop_from_llm: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+# -------------------------------------------------------------------
+#  OTHER FUNCTIONS (Standard App Logic)
+# -------------------------------------------------------------------
 
 def get_llm_plan(query: str, context: List[Dict], model: str = MODEL_PLAN) -> Dict:
-    """
-    Generates a structured step-by-step plan using the given model.
-    """
+    """Generates a structured step-by-step plan."""
     context_string = ""
     for i, sop in enumerate(context):
         title = sop.get('title', 'N/A')
         issue = sop.get('issue', 'N/A')
         steps = sop.get('steps', [])
         step_list = "\n".join([f"- {step.get('description', 'N/A')} (Tool: {step.get('script', 'N/A')})"
-                               for step in steps])
+                                for step in steps])
         context_string += f"Context Document {i+1}:\nTitle: {title}\nIssue: {issue}\nSteps:\n{step_list}\n\n"
-
-    logger.info(f"TOOL: context_string: {context_string}")        
 
     prompt = f"""
     You are an AI assistant acting as an Incident Resolution Manager.
-    Task: Convert a query + SOP context into a JSON plan with actionable steps. Do not skip, summarize, or rephrase any steps.
-    
+    Task: Convert a query + SOP context into a JSON plan.
     Query: "{query}"
     Context:
     {context_string}
-    
-    Response MUST be valid JSON:
-    {{
-      "steps": [
-        {{"description": "string", "tool": "string"}},
-        ...
-      ]
-    }}
-    Do not include any comments in the json.
+    Response MUST be valid JSON: {{ "steps": [ {{"description": "string", "tool": "string"}} ] }}
     """
-
     response_text = call_ollama(prompt, model=model)
-    
-    logger.debug("\n---------- LLM Raw Response for Plan ----------\n%s\n---------------------------------------------\n", response_text)
-    
-    return extract_json_from_text(response_text) or {"steps": []}
-
+    try:
+        return extract_json_from_text(response_text) or {"steps": []}
+    except Exception:
+        return auto_repair_json(response_text) or {"steps": []}
 
 def extract_parameters_with_llm(incident_data: Dict, script_params: List[Dict], model: str = MODEL_PARAMS) -> Dict:
     params_to_find = [
@@ -125,101 +292,20 @@ def extract_parameters_with_llm(incident_data: Dict, script_params: List[Dict], 
     params_to_find_str = "\n".join(params_to_find)
 
     prompt = f"""
-    You are an AI assistant helping to extract script parameters from incident data.
-    Always produce valid JSON as output — no explanations, no extra text.
-
-    Incident Data:
-    {json.dumps(incident_data, indent=2)}
-
-    Parameters to Extract:
-    {params_to_find_str}
-
-    Extraction Rules:
-    1. Carefully analyze the incident data (short_description, description, cmdb_ci, business_service, notes, 
-    and any previous script outputs if present).
-    2. For each parameter:
-    - If the value is explicitly mentioned, extract it exactly.
-    - If the value can be inferred (e.g., hostname, port, service name), infer it from the incident context.
-    - If the parameter has a default_value (provided separately by the system), you may leave it null here 
-      and the system will backfill it.
-    - If required and not available, return `null` (never invent random values).
-    3. Respect the parameter type:
-    - string → plain text
-    - integer → numeric value
-    - boolean → true/false
-    - path/directory → OS path format
-    4. Do not include extra keys, comments, or explanations in the output.
-    5. If you are unsure, set the value to `null`.
-
-    Output Format (strict JSON only):
-    {{
-    "param_name_1": value1,
-    "param_name_2": value2,
-    ...
-    }}
+    Extract script parameters from incident data into JSON.
+    Incident Data: {json.dumps(incident_data, indent=2)}
+    Parameters to Extract: {params_to_find_str}
+    Output Format: {{ "param_name": value }}
     """
-
-
     response_text = call_ollama(prompt, model=model)
-    return extract_json_from_text(response_text) or {}
+    try:
+        return extract_json_from_text(response_text) or {}
+    except Exception:
+        return auto_repair_json(response_text) or {}
 
-# Function to parse raw text into a structured SOP
-def get_structured_sop_from_llm(document_text: str) -> Dict:
-    """
-    Uses an LLM to parse raw SOP text into a structured JSON format with title, issue,
-    and a list of step descriptions. It does NOT attempt to match scripts.
-    """
-    prompt = f"""
-    You are an AI assistant that converts raw Standard Operating Procedure (SOP) text into a structured JSON object.
-
-    Your task:
-    - Parse the "Raw SOP Text" below and extract the `title`, `issue`, and an ordered list of `steps`.
-    - For the `issue`, provide a complete and detailed description of the SOP's purpose and scope.
-    - For each step in the `steps` array, provide a `description` only. Do not include a `script_id` field.
-
-    Rules:
-    - Your entire response must be a single, valid JSON object. Do not include any other text, explanations, or markdown.
-    - The JSON structure must be exactly:
-    {{
-      "title": "string",
-      "issue": "string",
-      "steps": [
-        {{ "description": "string" }}
-      ]
-    }}
-
-    Raw SOP Text:
-    {document_text}
-
-    JSON Output:
-    """
-    
-    logger.info("📝 Calling LLM to parse SOP text (Step A) using model: %s", MODEL_SOP_PARSER)
-
-    response = call_ollama(prompt, model=MODEL_SOP_PARSER)
-
-    logger.debug(f"LLM Response (Parse Only): {response}")
-    parsed_json = extract_json_from_text(response)
-    if not parsed_json or "steps" not in parsed_json:
-        raise ValueError("Invalid JSON response from LLM during parsing step.")
-    
-    logger.info("✅ Successfully parsed SOP text into a structured format.")
-    return parsed_json
-
-    
-def extract_json(response: str) -> str:
-    """
-    Extract the first valid JSON object from a string.
-    """
-    match = re.search(r"\{.*\}", response, re.DOTALL)
-    if match:
-        return match.group(0)
-    raise ValueError("No JSON object found in response.")
-
-def generate_hypothetical_sop(query: str, model: str = DEFAULT_MODELS["sop_parser"]) -> str:
+def generate_hypothetical_sop(query: str, model: str = MODEL_SOP_PARSER) -> str:
     """
     Uses an LLM to generate a hypothetical SOP document based on an incident query.
-    This expanded text is then used to create a more effective search vector.
     """
     prompt = f"""
     You are an expert Site Reliability Engineer. Based on the following incident description, write a concise, one-paragraph summary of an ideal Standard Operating Procedure (SOP) that would help in debugging and finally to resolve this issue.
@@ -277,7 +363,11 @@ def generate_detailed_sop_from_llm(problem_description: str) -> Dict:
     response_text = call_ollama(prompt, model=MODEL_SOP_GENERATOR)
     logger.debug("LLM Response (SOP Generation): %s", response_text)
     
-    parsed_json = extract_json_from_text(response_text)
+    try:
+        parsed_json = extract_json_from_text(response_text)
+    except Exception:
+        parsed_json = auto_repair_json(response_text)
+
     if not parsed_json or "steps" not in parsed_json:
         raise ValueError("Invalid or incomplete JSON response from LLM during SOP generation.")
     
@@ -334,7 +424,11 @@ def get_clarifying_questions_from_llm(problem_description: str) -> Dict:
     logger.info("📝 Calling LLM to analyze problem and generate clarifying questions...")
     response_text = call_ollama(prompt, model=MODEL_SOP_GENERATOR)
     
-    parsed_json = extract_json_from_text(response_text)
+    try:
+        parsed_json = extract_json_from_text(response_text)
+    except Exception:
+        parsed_json = auto_repair_json(response_text)
+
     if "questions" not in parsed_json:
         return {"questions": []} 
         
@@ -344,101 +438,18 @@ def get_clarifying_questions_from_llm(problem_description: str) -> Dict:
 def generate_script_from_context_llm(sop_context: Dict, model: str = settings.model_sop_parser) -> Dict:
     """
     Generates a complete, structured worker task object from the context of an Agent (SOP) draft.
-    Includes few-shot examples to guide LLaMA 3.1 in producing fully structured JSON outputs.
     """
-    # Unpack the context for the prompt
     title = sop_context.get("title", "N/A")
-    issue = sop_context.get("issue", "N/A")
-    all_steps = "\n".join([f"- {step}" for step in sop_context.get("steps", [])])
     target_step = sop_context.get("target_step_description", "N/A")
-
-    # Few-shot examples remain the same as they demonstrate the desired output structure
-    few_shot_examples = r'''
-    ### Example Output 1
-    ```json
-    {
-      "name": "Check Disk Space",
-      "description": "Verifies available disk space on the target host and alerts if below threshold.",
-      "content": "#!/bin/bash\nTHRESHOLD=${THRESHOLD:-80} # Default threshold if not provided\nTARGET_PATH=${TARGET_PATH:-/} # Default path if not provided\nUSAGE=$(df -h $TARGET_PATH | awk 'NR==2 {print $5}' | sed 's/%//')\nif [[ -z \"$USAGE\" ]]; then\n  echo \"Error retrieving disk usage for $TARGET_PATH.\"\n  exit 2\nfi\nif [ $USAGE -ge $THRESHOLD ]; then\n  echo \"CRITICAL: Disk usage on $TARGET_PATH is ${USAGE}% (Threshold: ${THRESHOLD}%).\"\n  exit 1\nelse\n  echo \"OK: Disk usage on $TARGET_PATH is ${USAGE}% (Threshold: ${THRESHOLD}%).\"\n  exit 0\nfi",
-      "params": [
-        {
-          "param_name": "TARGET_PATH",
-          "param_type": "string",
-          "required": false,
-          "default_value": "/"
-        },
-        {
-          "param_name": "THRESHOLD",
-          "param_type": "integer",
-          "required": false,
-          "default_value": "80"
-        }
-      ]
-    }
-    ```
-
-    ### Example Output 2
-    ```json
-    {
-      "name": "Restart Web Server",
-      "description": "Safely restarts the specified web server service and verifies its status.",
-      "content": "#!/bin/bash\nSERVICE_NAME=${SERVICE_NAME:-nginx}\necho \"Attempting to restart service: $SERVICE_NAME...\"\nsudo systemctl restart \"$SERVICE_NAME\"\nRESTART_CODE=$?\nsleep 3 # Allow time for service to potentially fail\necho \"Checking status of service: $SERVICE_NAME...\"\nif sudo systemctl is-active --quiet \"$SERVICE_NAME\"; then\n  echo \"OK: Service '$SERVICE_NAME' is active.\"\n  exit 0\nelse\n  echo \"CRITICAL: Service '$SERVICE_NAME' failed to start or is inactive after restart attempt (Exit code: $RESTART_CODE).\"\n  sudo systemctl status \"$SERVICE_NAME\" --no-pager\n  exit 1\nfi",
-      "params": [
-        {
-          "param_name": "SERVICE_NAME",
-          "param_type": "string",
-          "required": true,
-          "default_value": "nginx"
-        }
-      ]
-    }
-    ```
-
-    ### Example Output 3
-    ```json
-    {
-      "name": "Validate Database Connection",
-      "description": "Checks if a database is reachable using provided host and port.",
-      "content": "#!/bin/bash\nHOST=${DB_HOST}\nPORT=${DB_PORT:-5432}\nTIMEOUT=5 # Connection timeout in seconds\necho \"Checking connection to $HOST on port $PORT...\"\nif nc -zv -w $TIMEOUT \"$HOST\" \"$PORT\"; then\n  echo \"OK: Database connection successful to $HOST:$PORT.\"\n  exit 0\nelse\n  echo \"CRITICAL: Unable to connect to database at $HOST:$PORT within ${TIMEOUT}s.\"\n  exit 1\nfi",
-      "params": [
-        {
-          "param_name": "DB_HOST",
-          "param_type": "string",
-          "required": true,
-          "default_value": null
-        },
-        {
-          "param_name": "DB_PORT",
-          "param_type": "integer",
-          "required": false,        # Made optional as default is provided
-          "default_value": "5432" # Provide default as string, script can handle conversion if needed
-        }
-      ]
-    }
-    ```
-    '''
-
+    
     prompt = f"""
-    You are **"DevOps Architect X"**, a world-class DevOps engineer and master script author specializing in creating automated, production-grade shell scripts for enterprise systems based on Standard Operating Procedures (SOPs).
+    You are **"DevOps Architect X"**, a world-class DevOps engineer.
+    Your Task: Generate **only a single valid JSON object** that defines a complete worker task (shell script) designed to automate the **"Target Step"** below.
 
-    **Your Task:** Generate **only a single valid JSON object** that defines a complete worker task (shell script) designed to automate the **"Target Step"** described below, using the overall Agent (SOP) details for context.
+    **Agent (SOP) Title:** {title}
+    **Target Step to Automate:** "{target_step}"
 
-    ---
-    **Reference Examples (DO NOT COPY VERBATIM, USE FOR STRUCTURE ONLY):**
-    {few_shot_examples}
-    ---
-    **Context for Task Generation:**
-
-    **Agent (SOP) Details:**
-    * **Title:** {title}
-    * **Issue:** {issue}
-    * **All Steps:**
-    {all_steps}
-
-    **Target Step to Automate:**
-    * "{target_step}"
-    ---
-    **Output Format (MANDATORY - Respond with ONLY the JSON object):**
+    **Output Format (MANDATORY):**
     ```json
     {{
       "name": "string (Human-readable action, e.g., 'Check Disk Space')",
@@ -454,33 +465,16 @@ def generate_script_from_context_llm(sop_context: Dict, model: str = settings.mo
       ]
     }}
     ```
-    ---
-    **Rules & Guidelines:**
-    * **Naming Rule:** The `"name"` must be human-readable and describe the action (e.g., "Restart Web Server", "Check Database Connection"). **Do NOT include file extensions like '.sh'.**
-    * **Parameters:** Identify variables in the **target step** needing external input. List them in `"params"`. Use UPPERCASE names. If none needed, use `"params": []`.
-    * **Defaults:** Add `default_value` only if a sensible default exists (use correct type or `null`). Mark `required: false` if a default is provided.
-    * **Content:** Write a robust `#!/bin/bash` script. Use parameters like `${{PARAM_NAME:-default}}`. Include basic error checking and informative echo statements. Ensure newlines are `\\n`.
-    * **Idempotency:** Make the script safe to run multiple times where possible.
-    * **Security:** Avoid hardcoding credentials. Use parameters for sensitive data if necessary (though ideally managed externally). Use `sudo` explicitly if needed for commands.
-    * **Output:** The *entire* response must be *only* the JSON object specified. No introductory text, explanations, or markdown fences around the final JSON.
-    ---
-    **Generation Process:**
-    1.  Analyze the "Target Step" within the context of the "Agent Details".
-    2.  Determine the specific action(s) the script should perform.
-    3.  Identify necessary parameters and sensible defaults.
-    4.  Write the `#!/bin/bash` script, ensuring correctness and safety.
-    5.  Format the script content with escaped newlines (`\\n`).
-    6.  Construct the final JSON object according to the specified format.
-    7.  Output **only** the JSON object.
-
-    **JSON Output:**
     """
 
     logger.info("🤖 Calling LLM to generate a new worker task from Agent context...")
-    response_text = call_ollama(prompt, model=model) # Use model from arg
+    response_text = call_ollama(prompt, model=model) 
     logger.debug("LLM Response (Worker Task Generation from Context): %s", response_text)
 
-    parsed_json = extract_json_from_text(response_text)
+    try:
+        parsed_json = extract_json_from_text(response_text)
+    except Exception:
+        parsed_json = auto_repair_json(response_text)
 
     # Validate the structure
     if not isinstance(parsed_json, dict) or not all(k in parsed_json for k in ["name", "description", "content", "params"]):
@@ -490,15 +484,13 @@ def generate_script_from_context_llm(sop_context: Dict, model: str = settings.mo
         logger.error(f"Invalid 'params' field in LLM response (not a list). Response: {response_text}")
         raise ValueError("Invalid response from LLM: 'params' field must be a list.")
 
-    # Additional validation for params structure
     for param in parsed_json.get("params", []):
          if not isinstance(param, dict) or not all(k in param for k in ["param_name", "param_type", "required"]):
-              logger.error(f"Invalid parameter structure within 'params' list. Param: {param}. Response: {response_text}")
-              raise ValueError("Invalid response from LLM: Malformed item in 'params' list.")
+               logger.error(f"Invalid parameter structure within 'params' list. Param: {param}. Response: {response_text}")
+               raise ValueError("Invalid response from LLM: Malformed item in 'params' list.")
 
     logger.info(f"✅ Successfully generated worker task draft: '{parsed_json.get('name')}'")
     return parsed_json
-
 
 def generate_script_from_description_llm(description: str) -> Dict:
     """
@@ -544,7 +536,10 @@ def generate_script_from_description_llm(description: str) -> Dict:
     response_text = call_ollama(prompt, model=settings.model_sop_parser)
     logger.debug("LLM Response (Simple Worker Task Generation): %s", response_text)
 
-    parsed_json = extract_json_from_text(response_text)
+    try:
+        parsed_json = extract_json_from_text(response_text)
+    except Exception:
+        parsed_json = auto_repair_json(response_text)
 
     # Validate the structure
     if not isinstance(parsed_json, dict) or not all(k in parsed_json for k in ["name", "description", "content", "params"]):
@@ -553,7 +548,6 @@ def generate_script_from_description_llm(description: str) -> Dict:
     if not isinstance(parsed_json.get("params"), list):
          logger.error(f"Invalid 'params' field in LLM response (not a list). Response: {response_text}")
          raise ValueError("Invalid response from LLM: 'params' field must be a list.")
-
 
     logger.info(f"✅ Successfully generated worker task draft: '{parsed_json.get('name')}'")
     return parsed_json

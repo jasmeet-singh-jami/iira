@@ -1,4 +1,4 @@
-// src/App.js
+// iira-frontend/src/App.js
 import React, { useState, useEffect } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import Sidebar from './components/Sidebar';
@@ -21,17 +21,34 @@ import {
     fetchAgentRecommendationsApi, submitRetrievalFeedbackApi, fetchSearchThresholdsApi
 } from './services/apis';
 
-const createNewStep = () => ({
-    description: 'New Step', script_id: null, script: null,
-    isMatching: false, isCreating: false
-});
+// --- THIS IS THE FIRST MAJOR CHANGE ---
+// We no longer need the old createNewStep() function.
+// const createNewStep = () => ({ ... }); // <-- DELETE THIS FUNCTION
+
+// Define the new initial state for react-flow-builder
+const initialWorkflowNodes = [
+  {
+    id: 'start_node', // Must be unique
+    type: 'start',    // Must match a registered node type
+    name: 'Start',    // This is the display label
+    data: {           // We'll store our app-specific data here
+        description: 'Workflow starts here'
+    }
+  }
+];
+// --- END OF FIRST MAJOR CHANGE ---
 
 function App() {
     const [activePage, setActivePage] = useState('dashboard');
     const [ingestionTitle, setIngestionTitle] = useState('');
     const [ingestionIssue, setIngestionIssue] = useState('');
     const [ingestionTags, setIngestionTags] = useState('');
-    const [ingestionSteps, setIngestionSteps] = useState([createNewStep()]);
+    
+    // --- THIS IS THE SECOND MAJOR CHANGE ---
+    // Update the initial state to use our new variable
+    const [ingestionSteps, setIngestionSteps] = useState(initialWorkflowNodes);
+    // --- END OF SECOND MAJOR CHANGE ---
+
     const [ingestionRawText, setIngestionRawText] = useState('');
     const [trainerIncidentNumber, setTrainerIncidentNumber] = useState('');
     const [trainerShortDesc, setTrainerShortDesc] = useState('');
@@ -88,13 +105,57 @@ function App() {
 
     const resetIngestionForm = () => {
         setIngestionTitle(''); setIngestionIssue(''); setIngestionTags('');
-        setIngestionSteps([createNewStep()]); setIngestionRawText('');
+        // Reset the workflow to its initial state
+        setIngestionSteps(initialWorkflowNodes); 
+        setIngestionRawText('');
     };
     const handleDraftAndGenerateFromHistory = async (incident) => {
          const description = `Incident ${incident.incident_number}: ${incident.incident_data.short_description}\n\nFull Description:\n${incident.incident_data.description || ''}`;
          setIngestionRawText(description);
          setActivePage('onboard-runbook');
      };
+    
+     // --- AI GENERATION & PARSING (NEEDS UPDATE) ---
+     // These handlers need to be updated to output the new node structure.
+     // For now, I will map the old structure to the new one.
+
+     const convertOldStepsToNew = (steps) => {
+        const newNodes = [
+            { id: 'start_node', type: 'start', name: 'Start', data: { description: 'Workflow Start' } }
+        ];
+        let prevNodeId = 'start_node';
+
+        steps.forEach((step, index) => {
+            const newNodeId = `task_${index}`;
+            newNodes.push({
+                id: newNodeId,
+                type: 'node', // 'node' is our registered type for Tasks
+                name: step.description.substring(0, 30) || 'Task', // Use a short name
+                data: {
+                    description: step.description,
+                    script_id: step.script_id,
+                    script: step.script
+                }
+            });
+
+            // This part for edges is illustrative; react-flow-builder manages edges
+            // but you'd need to create them if building manually.
+            // The builder will handle adding nodes sequentially.
+            // For simplicity, we'll just add the nodes.
+            // The user will have to connect them.
+
+            prevNodeId = newNodeId;
+        });
+
+        newNodes.push({
+            id: 'end_node',
+            type: 'end',
+            name: 'End',
+            data: { description: 'Workflow End' }
+        });
+        return newNodes;
+     };
+
     const handleGenerateRunbook = async () => {
         if (!ingestionRawText.trim()) { setModal({ visible: true, message: 'Please enter a problem description.' }); return; }
         setIsGenerating(true);
@@ -105,7 +166,8 @@ function App() {
                 setUserAnswers(response.questions.reduce((acc, q) => ({ ...acc, [q]: '' }), {}));
             } else if (response.status === 'sop_generated') {
                 setIngestionTitle(response.title); setIngestionIssue(response.issue);
-                setIngestionSteps(response.steps.map(s => ({ ...createNewStep(), ...s })));
+                // Convert the AI's old step format to the new node format
+                setIngestionSteps(convertOldStepsToNew(response.steps));
                 setModal({ visible: true, message: 'Agent draft generated successfully!' });
             }
         } catch (error) { setModal({ visible: true, message: error.message }); }
@@ -117,7 +179,8 @@ function App() {
             const response = await generateSOPApi(ingestionRawText, userAnswers);
             if (response.status === 'sop_generated') {
                 setIngestionTitle(response.title); setIngestionIssue(response.issue);
-                setIngestionSteps(response.steps.map(s => ({ ...createNewStep(), ...s })));
+                // Convert the AI's old step format to the new node format
+                setIngestionSteps(convertOldStepsToNew(response.steps));
                 setModal({ visible: true, message: 'Agent draft generated!' });
             }
         } catch (error) { setModal({ visible: true, message: error.message }); }
@@ -129,52 +192,42 @@ function App() {
         try {
             const parsedData = await parseSOPApi(ingestionRawText);
             setIngestionTitle(parsedData.title); setIngestionIssue(parsedData.issue);
-            setIngestionSteps(parsedData.steps.map(s => ({ ...createNewStep(), ...s })));
+            // Convert the parsed old step format to the new node format
+            setIngestionSteps(convertOldStepsToNew(parsedData.steps));
             setModal({ visible: true, message: 'Agent parsed successfully!' });
         } catch (error) { setModal({ visible: true, message: `Failed to parse Agent: ${error.message}` }); }
         finally { setIsParsing(false); }
     };
-     const handleRematchStepScript = async (stepIndex) => {
-        if (stepIndex < 0 || stepIndex >= ingestionSteps.length) return;
-        const currentStep = ingestionSteps[stepIndex];
-        if (!currentStep?.description?.trim()) { setModal({ visible: true, message: 'Please enter step description.' }); return; }
-        setIngestionSteps(s => s.map((step, idx) => idx === stepIndex ? { ...step, isMatching: true } : step));
-        try {
-            const matchResult = await matchScriptApi(currentStep.description);
-            setIngestionSteps(s => s.map((step, idx) => idx === stepIndex ? { ...step, script_id: matchResult.script_id, script: matchResult.script_name, isMatching: false } : step));
-            setModal({ visible: true, message: matchResult.script_name ? `Match: ${matchResult.script_name}` : 'No match found.' });
-        } catch (error) { setModal({ visible: true, message: error.message }); setIngestionSteps(s => s.map((step, idx) => idx === stepIndex ? { ...step, isMatching: false } : step)); }
-    };
-    const handleCreateScriptForStep = async (stepIndex) => {
-         if (stepIndex < 0 || stepIndex >= ingestionSteps.length) return;
-        const targetStep = ingestionSteps[stepIndex];
-        if (!targetStep?.description?.trim()) { setModal({ visible: true, message: 'Please provide step description.' }); return; }
-        setIngestionSteps(s => s.map((step, idx) => idx === stepIndex ? { ...step, isCreating: true } : step));
-        try {
-            const context = { title: ingestionTitle, issue: ingestionIssue, steps: ingestionSteps.map(s => s.description), target_step_description: targetStep.description };
-            const generatedScript = await generateScriptFromContextApi(context);
-            setScriptToEdit({ ...createNewStep(), ...generatedScript });
-            setIsScriptModalOpen(true);
-        } catch (error) { setModal({ visible: true, message: error.message }); }
-        finally { setIngestionSteps(s => s.map((step, idx) => idx === stepIndex ? { ...step, isCreating: false } : step)); }
-    };
+    
+    // --- THESE HANDLERS ARE NOW OBSOLETE ---
+    // react-flow-builder handles adding/deleting nodes via the `onChange` handler (setIngestionSteps)
+    // We can delete these functions.
+    
+    // const handleRematchStepScript = async (stepIndex) => { ... };
+    // const handleCreateScriptForStep = async (stepIndex) => { ... };
     const onIngestionStepsChange = (newSteps) => { setIngestionSteps(newSteps); };
-    const handleAddIngestionStep = () => { setIngestionSteps(s => [ ...s, createNewStep() ]); };
-    const handleDeleteIngestionStep = (indexToDelete) => {
-        if (ingestionSteps.length <= 1) { setModal({ visible: true, message: 'Cannot delete the only step.' }); return; }
-        setConfirmationModal({
-            isOpen: true, title: 'Delete Step', message: `Delete Step ${indexToDelete + 1}?`,
-            onConfirm: () => { setIngestionSteps(s => s.filter((_, i) => i !== indexToDelete)); closeConfirmationModal(); }
-        });
-    };
-    const handleInsertIngestionStep = (indexToInsertAfter) => {
-        setIngestionSteps(s => { const newS = [...s]; newS.splice(indexToInsertAfter + 1, 0, createNewStep()); return newS; });
-    };
+    // const handleAddIngestionStep = () => { ... };
+    // const handleDeleteIngestionStep = (indexToDelete) => { ... };
+    // const handleInsertIngestionStep = (indexToInsertAfter) => { ... };
+
+    // --- END OBSOLETE HANDLERS ---
+
     const uploadRunbook = async () => {
         if (!ingestionTitle.trim()) { setModal({ visible: true, message: 'Agent Title cannot be empty.' }); return; }
         if (!ingestionIssue.trim()) { setModal({ visible: true, message: 'Issue Description cannot be empty.' }); return; }
-        const validSteps = ingestionSteps.filter(step => step.description.trim() && step.description !== 'New Step').map(({ isMatching, isCreating, index, ...rest }) => rest);
-        if (validSteps.length === 0) { setModal({ visible: true, message: 'Please provide valid step descriptions.' }); return; }
+        
+        // --- THIS LOGIC MUST BE UPDATED ---
+        // Convert the react-flow-builder nodes back into the simple step list the API expects.
+        const validSteps = ingestionSteps
+            .filter(node => node.type === 'node') // Only 'task' nodes are steps
+            .map(node => ({
+                description: node.data?.description || node.name,
+                script_id: node.data?.script_id || null,
+                script: node.data?.script || null
+            }));
+        // --- END UPDATED LOGIC ---
+
+        if (validSteps.length === 0) { setModal({ visible: true, message: 'Please add at least one Task node.' }); return; }
         try {
             const sopPayload = { title: ingestionTitle, issue: ingestionIssue, tags: ingestionTags.split(',').map(t=>t.trim()).filter(t => t), steps: validSteps };
             await uploadSOPApi(sopPayload);
@@ -185,14 +238,13 @@ function App() {
     };
 
     const handleFetchRecommendations = async () => {
+        // ... (this function is fine, no changes needed)
         const hasIncidentNumber = trainerIncidentNumber.trim();
         const hasDescriptions = trainerShortDesc.trim() && trainerDesc.trim();
-
         if (!hasIncidentNumber && !hasDescriptions) {
             setModal({ visible: true, message: 'Please enter an Incident Number OR both Short Description and Full Description.' });
             return;
         }
-
         setTrainerLoading(true); setRecommendedAgents([]); setFeedbackSessionId(null);
         try {
             const data = await fetchAgentRecommendationsApi(trainerShortDesc, trainerDesc, trainerIncidentNumber);
@@ -204,6 +256,7 @@ function App() {
     };
 
     const handleSubmitFeedback = async (feedbackType, recommendedAgent = null, selectedCorrectAgent = null) => {
+        // ... (this function is fine, no changes needed)
         setTrainerLoading(true);
         const feedbackData = {
             incident_number: trainerIncidentNumber || null,
@@ -234,6 +287,7 @@ function App() {
     };
 
     const clearTrainerRecommendations = () => {
+        // ... (this function is fine, no changes needed)
         setRecommendedAgents([]);
         setFeedbackSessionId(null);
     };
@@ -254,22 +308,26 @@ function App() {
                             title={ingestionTitle} setTitle={setIngestionTitle}
                             issue={ingestionIssue} setIssue={setIngestionIssue}
                             tags={ingestionTags} setTags={setIngestionTags}
-                            steps={ingestionSteps}
-                            onStepsChange={onIngestionStepsChange}
+                            steps={ingestionSteps} // This is now the 'nodes' array
+                            onStepsChange={onIngestionStepsChange} // This is our 'setNodes'
                             availableScripts={availableScripts}
                             onAddNewScript={handleOpenAddScriptModal}
                             uploadRunbook={uploadRunbook}
                             rawText={ingestionRawText} setRawText={setIngestionRawText}
                             handleParseDocument={handleParseDocument}
                             handleGenerateRunbook={handleGenerateRunbook}
-                            handleRematchStepScript={handleRematchStepScript}
-                            onCreateScriptForStep={handleCreateScriptForStep}
+                            
+                            // --- THESE PROPS ARE NO LONGER USED by WorkflowBuilder ---
+                            // handleRematchStepScript={handleRematchStepScript}
+                            // onCreateScriptForStep={onCreateScriptForStep}
+                            // onAddStep={handleAddIngestionStep}
+                            // onDeleteStep={handleDeleteIngestionStep}
+                            // onInsertStep={handleInsertIngestionStep}
+                            // --- END OBSOLETE PROPS ---
+
                             isGenerating={isGenerating}
                             isParsing={isParsing}
                             resetRunbookSteps={resetIngestionForm}
-                            onAddStep={handleAddIngestionStep}
-                            onDeleteStep={handleDeleteIngestionStep}
-                            onInsertStep={handleInsertIngestionStep}
                             setConfirmationModal={setConfirmationModal}
                         />;
             case 'scripts':
@@ -286,7 +344,7 @@ function App() {
                             setDescription={setTrainerDesc}
                             onFetchRecommendations={handleFetchRecommendations}
                             recommendations={recommendedAgents}
-                            thresholds={searchThresholds}
+_                           thresholds={searchThresholds}
                             onSubmitFeedback={handleSubmitFeedback}
                             allAgents={allAgents}
                             loading={trainerLoading}

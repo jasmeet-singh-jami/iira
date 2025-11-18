@@ -408,35 +408,43 @@ def delete_sop(request: SOPDeleteByIDRequest):
 def parse_sop_endpoint(request: SOPParseRequest):
     try:
         logger.info("--- Starting Two-Step SOP Parsing Workflow ---")
-        structured_sop = get_structured_sop_from_llm(request.document_text)
         
-        final_steps = []
+        # --- STEP A: Parse document text into nodes and connections ---
+        structured_workflow = get_structured_sop_from_llm(request.document_text)
         
-        logger.info("🔍  Starting Step B: Matching parsed steps to scripts via vector search...")
-        for i, step in enumerate(structured_sop.get("steps", [])):
-            description = step.get("description")
-            if not description:
-                continue
+        logger.info(f"Step A complete. Found {len(structured_workflow.get('nodes', []))} nodes.")
+        
+        # --- STEP B: Match 'action' nodes to scripts ---
+        logger.info("🔍  Starting Step B: Matching 'action' nodes to scripts via vector search...")
+        
+        nodes_to_process = structured_workflow.get("nodes", [])
+        
+        for i, node in enumerate(nodes_to_process):
+            if node.get("type") == "action":
+                description = node.get("description") or node.get("title")
+                if not description:
+                    continue
 
-            logger.info(f"--- Matching Step {i+1} ---")
-            search_results = search_scripts_by_description(description, top_k=1)
-            
-            best_match = search_results[0] if search_results else None
-            
-            final_steps.append({
-                "description": description,
-                "script": best_match['name'] if best_match else None,
-                "script_id": str(best_match['id']) if best_match else "Not Found"
-            })
-        
-        final_sop = {
-            "title": structured_sop.get("title", ""),
-            "issue": structured_sop.get("issue", ""),
-            "steps": final_steps
-        }
-        
+                logger.info(f"--- Matching Node {i+1} (ID: {node.get('id')}) ---")
+                search_results = search_scripts_by_description(description, top_k=1)
+                best_match = search_results[0] if search_results else None
+                
+                if best_match:
+                    node["data"] = {
+                        "description": description,
+                        "script": best_match['name'],
+                        "script_id": str(best_match['id'])
+                    }
+                else:
+                    node["data"] = {
+                        "description": description,
+                        "script": None,
+                        "script_id": "Not Found"
+                    }
+
         logger.info("✅  Successfully completed two-step SOP parsing.")
-        return JSONResponse(content=final_sop, status_code=200)
+        
+        return JSONResponse(content=structured_workflow, status_code=200)
 
     except HTTPException:
         raise
