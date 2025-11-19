@@ -13,7 +13,7 @@ import Modal from './components/Modal';
 import AddNewScriptModal from './components/AddNewScriptModal';
 import ConfirmationModal from './components/ConfirmationModal';
 import ClarificationModal from './components/ClarificationModal';
-
+import '@xyflow/react/dist/style.css';
 import {
     fetchScriptsApi, uploadSOPApi, deleteScriptApi, matchScriptApi,
     generateSOPApi, generateScriptFromContextApi, parseSOPApi,

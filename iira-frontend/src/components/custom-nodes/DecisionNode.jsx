@@ -1,51 +1,57 @@
-// iira-frontend/src/components/custom-nodes/DecisionNode.jsx
-import React from 'react';
-import { Handle, Position } from 'reactflow';
-import { Share2 } from 'lucide-react'; 
+import React, { memo } from 'react';
+import { Handle, Position } from '@xyflow/react';
+import { GitBranch, Check, X } from 'lucide-react';
 
-/**
- * Custom node to represent a decision point (Conditional/Fork). 
- * It has one target (input) and two sources (outputs) for branching: 'True' and 'False'.
- */
-const DecisionNode = ({ data }) => {
-    return (
-        <div className="p-4 border-2 border-red-500 rounded-lg bg-white w-48 shadow-lg text-center">
-            {/* Target Handle (Input) */}
-            <Handle 
-                type="target" 
-                position={Position.Top} 
-                className="w-3 h-3 !bg-red-500" 
-            />
-            
-            <div className="flex flex-col items-center">
-                <Share2 size={24} className="text-red-500 mb-2"/>
-                <div className="font-bold text-red-800">Decision/Conditional</div>
-                <div className="text-xs text-gray-600 mt-1">
-                    {data.label || 'Condition Check'}
-                </div>
-            </div>
-            
-            {/* Source Handle 'a' for False Branch (Left) */}
-            <Handle 
-                type="source" 
-                position={Position.Left} 
-                id="a" // Unique ID for this specific source handle
-                style={{ top: '50%', left: -5, transform: 'translate(0, -50%)', border: '2px solid #ef4444' }} 
-                className="w-3 h-3 !bg-white" 
-            />
-            <div className="absolute top-1/2 left-0 transform -translate-x-full -translate-y-1/2 text-xs text-red-600 pr-1">False</div>
+const DecisionNode = ({ data, isConnectable }) => {
+  return (
+    <div className="px-4 py-2 shadow-md rounded-md bg-white border-2 border-yellow-400 w-[200px]">
+      {/* Input Handle (Top) */}
+      <Handle
+        type="target"
+        position={Position.Top}
+        isConnectable={isConnectable}
+        className="w-3 h-3 bg-gray-500"
+      />
 
-            {/* Source Handle 'b' for True Branch (Right) */}
-            <Handle 
-                type="source" 
-                position={Position.Right} 
-                id="b" // Unique ID for this specific source handle
-                style={{ top: '50%', right: -5, transform: 'translate(0, -50%)', border: '2px solid #10b981' }} 
-                className="w-3 h-3 !bg-white" 
-            />
-             <div className="absolute top-1/2 right-0 transform translate-x-full -translate-y-1/2 text-xs text-green-600 pl-1">True</div>
+      <div className="flex items-center">
+        <div className="rounded-full w-8 h-8 flex items-center justify-center bg-yellow-100 text-yellow-600 mr-3">
+          <GitBranch size={16} />
         </div>
-    );
+        <div className="flex-grow">
+          <p className="text-xs font-bold text-gray-500 uppercase">Decision</p>
+          <p className="text-sm font-semibold text-gray-900">{data.label || 'Condition?'}</p>
+        </div>
+      </div>
+
+      {/* Output Handles (Bottom) - Fork Logic */}
+      <div className="flex justify-between mt-3 pt-2 border-t border-gray-100 relative h-6">
+        
+        {/* True/Yes Path */}
+        <div className="absolute left-2 -bottom-1 flex flex-col items-center">
+            <span className="text-[10px] font-bold text-green-600 mb-1">YES</span>
+            <Handle
+                type="source"
+                position={Position.Bottom}
+                id="true"
+                isConnectable={isConnectable}
+                className="!bg-green-500 !w-3 !h-3 !relative !transform-none !left-0"
+            />
+        </div>
+
+        {/* False/No Path */}
+        <div className="absolute right-2 -bottom-1 flex flex-col items-center">
+            <span className="text-[10px] font-bold text-red-600 mb-1">NO</span>
+             <Handle
+                type="source"
+                position={Position.Bottom}
+                id="false"
+                isConnectable={isConnectable}
+                className="!bg-red-500 !w-3 !h-3 !relative !transform-none !left-0"
+            />
+        </div>
+      </div>
+    </div>
+  );
 };
 
-export default DecisionNode;
+export default memo(DecisionNode);

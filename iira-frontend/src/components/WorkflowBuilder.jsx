@@ -1,37 +1,66 @@
+import '@xyflow/react/dist/style.css';
 import React, { useState, useEffect, useCallback, useMemo, useRef } from 'react';
-import ReactFlow, {
+import {
+    ReactFlow,
     useNodesState,
     useEdgesState,
     addEdge,
     Controls,
     Background,
     MarkerType,
-    // --- Removed unneeded imports for CustomEdge ---
     useReactFlow,
     ReactFlowProvider,
-} from 'reactflow';
-import 'reactflow/dist/style.css';
+    Panel,
+} from '@xyflow/react';
+
+import dagre from 'dagre'; // Helper for auto-layout
+import { Plus, GitBranch, Save, Layout } from 'lucide-react';
+
+// Custom Nodes
 import StepNode from './custom-nodes/StepNode';
-// --- ADDED: Import new DecisionNode ---
-import DecisionNode from './custom-nodes/DecisionNode'; 
+import DecisionNode from './custom-nodes/DecisionNode';
 import PropertiesPanel from './PropertiesPanel';
-// --- ADDED: Import GitBranch icon ---
-import { Plus, GitBranch } from 'lucide-react'; 
 
-// --- UPDATED: Register new DecisionNode type ---
-const nodeTypes = { 
+const nodeTypes = {
     stepNode: StepNode,
-    decisionNode: DecisionNode 
+    decisionNode: DecisionNode,
 };
 
-// --- REMOVED CustomEdge component entirely as it's not suited for a non-linear editor. ---
+// --- Auto Layout Helper Function ---
+const dagreGraph = new dagre.graphlib.Graph();
+dagreGraph.setDefaultEdgeLabel(() => ({}));
 
-// Define edge types map (using default edges now)
-const edgeTypes = {
-    // If you need custom edge appearance (e.g., smoother lines), set 'default' here: 
-    // default: SmoothStepEdge, 
+const getLayoutedElements = (nodes, edges, direction = 'TB') => {
+    const isHorizontal = direction === 'LR';
+    dagreGraph.setGraph({ rankdir: direction });
+
+    nodes.forEach((node) => {
+        // Approximate width/height for layout calculation
+        dagreGraph.setNode(node.id, { width: 200, height: 100 });
+    });
+
+    edges.forEach((edge) => {
+        dagreGraph.setEdge(edge.source, edge.target);
+    });
+
+    dagre.layout(dagreGraph);
+
+    const layoutedNodes = nodes.map((node) => {
+        const nodeWithPosition = dagreGraph.node(node.id);
+        return {
+            ...node,
+            targetPosition: isHorizontal ? 'left' : 'top',
+            sourcePosition: isHorizontal ? 'right' : 'bottom',
+            // Shift slightly to center the node
+            position: {
+                x: nodeWithPosition.x - 100,
+                y: nodeWithPosition.y - 50,
+            },
+        };
+    });
+
+    return { nodes: layoutedNodes, edges };
 };
-
 
 const WorkflowBuilder = ({
     initialSteps,
@@ -41,9 +70,7 @@ const WorkflowBuilder = ({
     onAddNewScript,
     onRematchStep,
     onCreateScript,
-    onAddStep,
     onDeleteStep,
-    onInsertStep,
     setConfirmationModal
 }) => {
     const [nodes, setNodes, onNodesChange] = useNodesState([]);
@@ -52,285 +79,240 @@ const WorkflowBuilder = ({
     const reactFlowWrapper = useRef(null);
     const { fitView, getViewport } = useReactFlow();
 
-    // --- NEW: Handle connections for a non-linear editor ---
+    // --- 1. Handle Connections (Manual Linking) ---
     const onConnect = useCallback(
-        (params) => setEdges((eds) => addEdge({ 
-            ...params, 
-            type: 'default', // Use default edge type
-            markerEnd: { type: MarkerType.ArrowClosed, width: 20, height: 20, color: '#6b7280' },
-            style: { stroke: '#6b7280', strokeWidth: 2 }
-        }, eds)),
+        (params) => {
+            let edgeColor = '#6b7280'; // Default Gray
+            
+            // Color code edges coming from Decision Nodes
+            if (params.sourceHandle === 'true') edgeColor = '#10b981'; // Green
+            if (params.sourceHandle === 'false') edgeColor = '#ef4444'; // Red
+
+            const newEdge = {
+                ...params,
+                type: 'default', // or 'smoothstep' for cleaner lines
+                markerEnd: { type: MarkerType.ArrowClosed, color: edgeColor },
+                style: { stroke: edgeColor, strokeWidth: 2 },
+            };
+            setEdges((eds) => addEdge(newEdge, eds));
+        },
         [setEdges],
     );
 
-    // --- NEW: Handle node deletion ---
+    // --- 2. Handle Node Deletion ---
     const onNodesDelete = useCallback(
         (deletedNodes) => {
-            deletedNodes.forEach(node => {
-                if (node.type === 'stepNode' && node.data.index !== undefined) {
-                    // Call the parent function to update the original step data array
+            deletedNodes.forEach((node) => {
+                // If it's a sequential step linked to the original data index, notify parent
+                if (node.type === 'stepNode' && typeof node.data.index === 'number') {
                     onDeleteStep(node.data.index);
                 }
             });
-            // React Flow handles the actual node/edge removal from its state
-            setEdges((eds) => deletedNodes.reduce((acc, node) => acc.filter(edge => edge.source !== node.id && edge.target !== node.id), eds));
         },
-        [onDeleteStep, setEdges]
+        [onDeleteStep]
     );
 
-
-    // Recalculate Nodes and Edges when initialSteps changes
+    // --- 3. Transform Initial Data to Graph (Run Once or on Reset) ---
     useEffect(() => {
-        const existingNodeMap = new Map(nodes.map(n => [n.id, n]));
+        if (!initialSteps || initialSteps.length === 0) return;
 
-        const yPos = (index) => 150 + index * 150;
-        const xPos = 200;
+        const initialNodes = [];
+        const initialEdges = [];
 
-        // Re-calculate step nodes to preserve position/data
-        const stepNodes = initialSteps.map((step, index) => {
-             const id = `step-${index}`;
-             const existing = existingNodeMap.get(id);
-             return {
-                 id: id, 
-                 type: 'stepNode', 
-                 data: { ...step, index }, 
-                 position: existing ? existing.position : { x: xPos, y: yPos(index) },
-                 deletable: true,
-                 draggable: true,
-             }
-         });
-
-        const startNode = { 
-            id: 'start', type: 'input', data: { label: 'Start' }, 
-            position: existingNodeMap.get('start')?.position || { x: xPos + 50, y: 0 }, 
-            deletable: false, draggable: false 
-        };
-        const endNode = { 
-            id: 'end', type: 'output', data: { label: 'End' }, 
-            position: existingNodeMap.get('end')?.position || { x: xPos + 50, y: yPos(initialSteps.length + 3) }, 
-            deletable: false, draggable: false 
-        };
-
-        // --- DEMO NODES: Show Fork and Join Capability ---
-        const decisionNode = {
-            id: 'decision-1',
-            type: 'decisionNode', // FORK / CONDITIONAL
-            data: { label: 'Is Service Up?' },
-            position: existingNodeMap.get('decision-1')?.position || { x: xPos + 50, y: yPos(1) },
-            deletable: true,
-            draggable: true,
-        };
-        
-        const joinNode = {
-            id: 'join-1',
-            type: 'stepNode',
-            data: { 
-                description: 'Joined execution path.', 
-                script: 'merge_logs.sh', 
-                index: initialSteps.length 
-            },
-            position: existingNodeMap.get('join-1')?.position || { x: xPos + 150, y: yPos(initialSteps.length + 1) },
-            deletable: true,
-            draggable: true,
-        };
-
-        // If no steps, just show a sequential flow with the demo nodes for editing practice
-        const demoNode = stepNodes.length > 0 ? stepNodes[0] : { 
-            id: 'step-0', 
-            type: 'stepNode', 
-            data: { description: 'Placeholder Step', index: 0 }, 
-            position: { x: xPos - 50, y: yPos(2) } 
-        };
-
-        const defaultEdgeProps = { 
-            type: 'default', 
-            markerEnd: { type: MarkerType.ArrowClosed, width: 20, height: 20, color: '#6b7280' }, 
-            style: { stroke: '#6b7280', strokeWidth: 2 } 
-        };
-
-        const autoEdges = [];
-
-        // 1. Start -> Decision (Example Fork)
-        autoEdges.push({ 
-            id: 'e-start-decision', 
-            source: 'start', target: 'decision-1', 
-            ...defaultEdgeProps 
+        // Create Start Node
+        initialNodes.push({
+            id: 'start',
+            type: 'input',
+            data: { label: 'Start' },
+            position: { x: 0, y: 0 },
         });
 
-        // 2. Decision -> Demo Step (True branch)
-        autoEdges.push({ 
-            id: 'e-decision-step-true', 
-            source: 'decision-1', target: demoNode.id, 
-            sourceHandle: 'b', // Connects to the 'True' handle on DecisionNode
-            ...defaultEdgeProps,
-            style: { ...defaultEdgeProps.style, stroke: '#10b981' } // Green for True
+        // Convert Linear Steps to Nodes
+        initialSteps.forEach((step, index) => {
+            initialNodes.push({
+                id: `step-${index}`,
+                type: 'stepNode',
+                data: { ...step, index }, // Pass all step data
+                position: { x: 0, y: 0 }, // Position handled by dagre later
+            });
         });
 
-         // 3. Decision -> Join Node (False branch)
-        autoEdges.push({ 
-            id: 'e-decision-join-false', 
-            source: 'decision-1', target: 'join-1', 
-            sourceHandle: 'a', // Connects to the 'False' handle on DecisionNode
-            ...defaultEdgeProps,
-            style: { ...defaultEdgeProps.style, stroke: '#ef4444' } // Red for False
+        // Create End Node
+        initialNodes.push({
+            id: 'end',
+            type: 'output',
+            data: { label: 'End' },
+            position: { x: 0, y: 0 },
         });
 
-        // 4. Demo Step -> Join (Example Join Point)
-        autoEdges.push({ 
-            id: 'e-step-join', 
-            source: demoNode.id, target: 'join-1', 
-            ...defaultEdgeProps 
-        });
+        // Create Default Sequential Edges (Linear Flow)
+        initialEdges.push({ id: 'e-start-0', source: 'start', target: 'step-0', type: 'default' });
 
-        // 5. Join -> End
-         autoEdges.push({ 
-            id: 'e-join-end', 
-            source: 'join-1', target: 'end', 
-            ...defaultEdgeProps 
-        });
-        
-        const allNodes = [
-            startNode, 
-            endNode, 
-            decisionNode, 
-            joinNode, 
-            demoNode, 
-            ...stepNodes.slice(stepNodes.length > 0 ? 1 : 0) // Add remaining step nodes if they exist
-        ];
-
-        setNodes(allNodes);
-        setEdges(autoEdges);
-        // --- End Simplified Edges ---
-
-        if (selectedNodeId && !allNodes.find(n => n.id === selectedNodeId)) {
-            setSelectedNodeId(null);
+        for (let i = 0; i < initialSteps.length - 1; i++) {
+            initialEdges.push({
+                id: `e-${i}-${i + 1}`,
+                source: `step-${i}`,
+                target: `step-${i + 1}`,
+                type: 'default',
+                markerEnd: { type: MarkerType.ArrowClosed },
+            });
         }
 
-        if (nodes.length === 0 || initialSteps.length > 0) {
-             setTimeout(() => { fitView({ padding: 0.2, duration: 300 }); }, 50);
-        }
+        initialEdges.push({
+            id: `e-${initialSteps.length - 1}-end`,
+            source: `step-${initialSteps.length - 1}`,
+            target: 'end',
+            type: 'default',
+            markerEnd: { type: MarkerType.ArrowClosed },
+        });
 
-    }, [initialSteps, setNodes, setEdges, selectedNodeId, fitView, nodes.length]); 
+        // Apply Auto Layout
+        const { nodes: layoutedNodes, edges: layoutedEdges } = getLayoutedElements(
+            initialNodes,
+            initialEdges
+        );
 
-    // ... (onNodeClick and handleUpdateStep remain largely the same, but now handle decisionNode selection)
+        setNodes(layoutedNodes);
+        setEdges(layoutedEdges);
 
+        setTimeout(() => fitView(), 100);
+
+    }, [initialSteps, setNodes, setEdges, fitView]);
+
+
+    // --- 4. Interactions ---
     const onNodeClick = useCallback((event, node) => {
-         event.stopPropagation();
-        if (node.type === 'stepNode' || node.type === 'decisionNode') { 
+        // Only show properties for configurable nodes
+        if (node.type === 'stepNode' || node.type === 'decisionNode') {
             setSelectedNodeId(node.id);
         } else {
             setSelectedNodeId(null);
         }
     }, []);
 
+    const onLayout = useCallback(() => {
+        const { nodes: layoutedNodes, edges: layoutedEdges } = getLayoutedElements(
+            nodes,
+            edges
+        );
+        setNodes([...layoutedNodes]);
+        setEdges([...layoutedEdges]);
+        fitView({ duration: 400 });
+    }, [nodes, edges, setNodes, setEdges, fitView]);
+
     const handleUpdateStep = useCallback((updatedStepData) => {
-        // NOTE: This logic only updates stepNodes that match the 'step-index' ID pattern
-        // You would need to add logic here to update properties of 'decisionNode' too.
-        const newSteps = initialSteps.map((step, index) => {
-             if (`step-${index}` === selectedNodeId) {
-                 return { ...step, ...updatedStepData };
-             }
-             return step;
-         });
-         onStepsChange(newSteps);
-    }, [selectedNodeId, initialSteps, onStepsChange]);
-
-    const selectedNode = useMemo(() => nodes.find(n => n.id === selectedNodeId), [nodes, selectedNodeId]);
-
-    // --- NEW: Function to add a new node at current viewport center ---
-    const addNode = useCallback((type) => {
-        const reactFlowBounds = reactFlowWrapper.current.getBoundingClientRect();
-        const viewport = getViewport();
-        // Calculate center position in canvas coordinates
-        const x = (reactFlowBounds.width / 2 - viewport.x) / viewport.zoom;
-        const y = (reactFlowBounds.height / 2 - viewport.y) / viewport.zoom;
+        setNodes((nds) =>
+            nds.map((node) => {
+                if (node.id === selectedNodeId) {
+                    // Update internal node data
+                    return { ...node, data: { ...node.data, ...updatedStepData } };
+                }
+                return node;
+            })
+        );
         
+        // Notify parent if strictly needed (optional depending on your save logic)
+        // const newSteps = ... reconstruct linear array if needed
+        // onStepsChange(newSteps); 
+    }, [selectedNodeId, setNodes]);
+
+    const selectedNode = useMemo(() => nodes.find((n) => n.id === selectedNodeId), [nodes, selectedNodeId]);
+
+    // --- 5. Add New Nodes ---
+    const addNode = useCallback((type) => {
+        const viewport = getViewport();
+        // Randomize slightly so they don't stack perfectly on top of each other
+        const x = -viewport.x / viewport.zoom + (Math.random() * 100 + 100);
+        const y = -viewport.y / viewport.zoom + (Math.random() * 100 + 100);
+
         const newNode = {
             id: `${type}-${Date.now()}`,
             type: type,
             position: { x, y },
-            data: { label: type === 'stepNode' ? 'New Step' : 'New Decision' },
-            deletable: true,
-            draggable: true,
+            data: { 
+                label: type === 'stepNode' ? 'New Step' : 'Check Condition',
+                description: 'Describe task...'
+            },
         };
-        
+
         setNodes((nds) => nds.concat(newNode));
     }, [setNodes, getViewport]);
 
-    const handleAddStepClick = useCallback(() => addNode('stepNode'), [addNode]);
-    const handleAddDecisionClick = useCallback(() => addNode('decisionNode'), [addNode]);
-
 
     return (
-        <div className="flex h-[70vh] border rounded-lg overflow-hidden">
-            <div className="flex-grow relative bg-gray-100" ref={reactFlowWrapper}>
+        <div className="flex h-[75vh] border rounded-lg overflow-hidden bg-gray-50">
+            <div className="flex-grow relative" ref={reactFlowWrapper}>
                 <ReactFlow
                     nodes={nodes}
                     edges={edges}
                     onNodesChange={onNodesChange}
                     onEdgesChange={onEdgesChange}
+                    onConnect={onConnect}
                     onNodeClick={onNodeClick}
+                    onNodesDelete={onNodesDelete}
                     onPaneClick={() => setSelectedNodeId(null)}
-                    onConnect={onConnect} // <<< ADDED onConnect for manual linking
-                    onNodesDelete={onNodesDelete} // <<< ADDED onNodesDelete for deletion
                     nodeTypes={nodeTypes}
-                    edgeTypes={edgeTypes}
                     fitView
-                    // --- ENABLED FREE-FORM EDITING ---
-                    nodesDraggable={true} 
-                    nodesConnectable={true}
-                    elementsSelectable={true}
-                    deleteKeyCode={['Backspace', 'Delete']} 
                 >
                     <Controls />
-                    <Background variant="dots" gap={12} size={1} />
+                    <Background color="#aaa" gap={16} />
+                    
+                    {/* Floating Toolbar */}
+                    <Panel position="top-left" className="bg-white p-2 rounded-lg shadow-lg border border-gray-200 flex gap-2">
+                        <button
+                            onClick={() => addNode('stepNode')}
+                            className="flex items-center px-3 py-1.5 bg-blue-50 text-blue-600 hover:bg-blue-100 rounded-md transition text-sm font-medium"
+                        >
+                            <Plus size={16} className="mr-1" /> Step
+                        </button>
+                        <button
+                            onClick={() => addNode('decisionNode')}
+                            className="flex items-center px-3 py-1.5 bg-yellow-50 text-yellow-600 hover:bg-yellow-100 rounded-md transition text-sm font-medium"
+                        >
+                            <GitBranch size={16} className="mr-1" /> Decision
+                        </button>
+                        <div className="w-px bg-gray-300 mx-1"></div>
+                        <button
+                            onClick={onLayout}
+                            className="flex items-center px-3 py-1.5 bg-gray-50 text-gray-600 hover:bg-gray-100 rounded-md transition text-sm font-medium"
+                            title="Auto Arrange"
+                        >
+                            <Layout size={16} className="mr-1" /> Arrange
+                        </button>
+                    </Panel>
+
+                    <Panel position="top-right">
+                        <button
+                            onClick={onSave}
+                            className="flex items-center px-4 py-2 bg-blue-600 text-white hover:bg-blue-700 shadow-md rounded-md transition font-semibold"
+                        >
+                            <Save size={18} className="mr-2" /> Save Workflow
+                        </button>
+                    </Panel>
                 </ReactFlow>
-
-                 {/* --- REPLACED ADD STEP WITH NODE PICKER BUTTONS --- */}
-                <div className="absolute top-4 left-4 flex space-x-3">
-                    <button
-                        onClick={handleAddStepClick}
-                        className="px-4 py-2 bg-green-600 text-white font-semibold rounded-lg shadow-lg hover:bg-green-700 transition flex items-center focus:outline-none focus:ring-2 focus:ring-green-400"
-                        title="Add New Sequential Step"
-                    >
-                        <Plus size={18} className="mr-2"/> Add Step
-                    </button>
-                     <button
-                        onClick={handleAddDecisionClick}
-                        className="px-4 py-2 bg-red-600 text-white font-semibold rounded-lg shadow-lg hover:bg-red-700 transition flex items-center focus:outline-none focus:ring-2 focus:ring-red-400"
-                        title="Add Conditional/Decision Node (Fork)"
-                    >
-                        <GitBranch size={18} className="mr-2"/> Add Decision
-                    </button>
-                </div>
-                {/* --------------------------------------------------- */}
-
-                <button
-                    onClick={onSave}
-                    className="absolute top-4 right-4 px-6 py-2 bg-blue-600 text-white font-bold rounded-lg shadow-lg hover:bg-blue-700 transition focus:outline-none focus:ring-2 focus:ring-blue-400"
-                >
-                    Save Agent
-                </button>
             </div>
+
+            {/* Properties Sidebar */}
             {selectedNode && (
-                <PropertiesPanel
-                    key={selectedNode.id}
-                    nodeData={selectedNode.data}
-                    availableScripts={availableScripts}
-                    onUpdate={handleUpdateStep}
-                    onClose={() => setSelectedNodeId(null)}
-                    onAddNewScript={onAddNewScript}
-                    onRematchStep={onRematchStep}
-                    onCreateScript={onCreateScript}
-                    onDeleteStep={onDeleteStep} 
-                    setConfirmationModal={setConfirmationModal} 
-                />
+                <div className="w-96 border-l border-gray-200 bg-white shadow-xl z-10 overflow-y-auto">
+                    <PropertiesPanel
+                        key={selectedNode.id}
+                        nodeData={selectedNode.data}
+                        availableScripts={availableScripts}
+                        onUpdate={handleUpdateStep}
+                        onClose={() => setSelectedNodeId(null)}
+                        onAddNewScript={onAddNewScript}
+                        onRematchStep={onRematchStep}
+                        onCreateScript={onCreateScript}
+                        onDeleteStep={onDeleteStep}
+                        setConfirmationModal={setConfirmationModal}
+                    />
+                </div>
             )}
         </div>
     );
 };
 
-// Wrap WorkflowBuilder with ReactFlowProvider to use hooks like useReactFlow
 const WorkflowBuilderWrapper = (props) => (
     <ReactFlowProvider>
         <WorkflowBuilder {...props} />
