@@ -404,54 +404,158 @@ def delete_sop(request: SOPDeleteByIDRequest):
     else:
         raise HTTPException(status_code=404, detail=f"Failed to delete SOP with the sop_id '{request.sop_id}'.")
 
+# @app.post("/parse_sop", summary="Parse raw SOP text and match steps to scripts using vector search")
+# def parse_sop_endpoint(request: SOPParseRequest):
+#     try:
+#         logger.info("--- Starting Two-Step SOP Parsing Workflow ---")
+        
+#         # --- STEP A: Parse document text into nodes and connections ---
+#         structured_workflow = get_structured_sop_from_llm(request.document_text)
+        
+#         logger.info(f"Step A complete. Found {len(structured_workflow.get('nodes', []))} nodes.")
+        
+#         # --- STEP B: Match 'action' nodes to scripts ---
+#         logger.info("🔍  Starting Step B: Matching 'action' nodes to scripts via vector search...")
+        
+#         nodes_to_process = structured_workflow.get("nodes", [])
+        
+#         for i, node in enumerate(nodes_to_process):
+#             if node.get("type") == "action":
+#                 description = node.get("description") or node.get("title")
+#                 if not description:
+#                     continue
+
+#                 logger.info(f"--- Matching Node {i+1} (ID: {node.get('id')}) ---")
+#                 search_results = search_scripts_by_description(description, top_k=1)
+#                 best_match = search_results[0] if search_results else None
+                
+#                 if best_match:
+#                     node["data"] = {
+#                         "description": description,
+#                         "script": best_match['name'],
+#                         "script_id": str(best_match['id'])
+#                     }
+#                 else:
+#                     node["data"] = {
+#                         "description": description,
+#                         "script": None,
+#                         "script_id": "Not Found"
+#                     }
+
+#         logger.info("✅  Successfully completed two-step SOP parsing.")
+        
+#         return JSONResponse(content=structured_workflow, status_code=200)
+
+#     except HTTPException:
+#         raise
+#     except Exception as e:
+#         logger.exception("🔥  Error during SOP parsing workflow")
+#         raise HTTPException(status_code=500, detail=f"An error occurred during AI parsing: {str(e)}")
+# ... existing imports ...
+
 @app.post("/parse_sop", summary="Parse raw SOP text and match steps to scripts using vector search")
 def parse_sop_endpoint(request: SOPParseRequest):
-    try:
-        logger.info("--- Starting Two-Step SOP Parsing Workflow ---")
-        
-        # --- STEP A: Parse document text into nodes and connections ---
-        structured_workflow = get_structured_sop_from_llm(request.document_text)
-        
-        logger.info(f"Step A complete. Found {len(structured_workflow.get('nodes', []))} nodes.")
-        
-        # --- STEP B: Match 'action' nodes to scripts ---
-        logger.info("🔍  Starting Step B: Matching 'action' nodes to scripts via vector search...")
-        
-        nodes_to_process = structured_workflow.get("nodes", [])
-        
-        for i, node in enumerate(nodes_to_process):
-            if node.get("type") == "action":
-                description = node.get("description") or node.get("title")
-                if not description:
-                    continue
+    logger.info("--- RETURN HARDCODED WORKFLOW FOR TESTING ---")
+    
+    # Hardcoded JSON structure for Rete.js testing
+    hardcoded_response = {
+        "title": "Apache Server Troubleshooting (Test)",
+        "issue": "Resolves cases where Apache service stops responding.",
+        "nodes": [
+            {
+                "id": "1",
+                "type": "start",
+                "title": "Start",
+                "description": "Begin troubleshooting process",
+                "x": 400,
+                "y": 50
+            },
+            {
+                "id": "2",
+                "type": "action",
+                "title": "Check Apache Service",
+                "description": "Check if Apache service is active",
+                "x": 400,
+                "y": 200,
+                "data": {
+                    "script": "check-apache-status.sh",
+                    "script_id": "54"
+                }
+            },
+            {
+                "id": "3",
+                "type": "condition",
+                "title": "Is Running?",
+                "description": "Validate service status output",
+                "x": 400,
+                "y": 350
+            },
+            {
+                "id": "4",
+                "type": "action",
+                "title": "Check Config",
+                "description": "Validate configuration files",
+                "x": 200,
+                "y": 500,
+                "data": {
+                    "script": "verify-config.sh",
+                    "script_id": "55"
+                }
+            },
+            {
+                "id": "5",
+                "type": "action",
+                "title": "Restart Service",
+                "description": "Attempt service restart",
+                "x": 200,
+                "y": 650,
+                "data": {
+                    "script": "restart-service.sh",
+                    "script_id": "56"
+                }
+            },
+            {
+                "id": "6",
+                "type": "end",
+                "title": "End",
+                "description": "Workflow Completed",
+                "x": 400,
+                "y": 830
+            }
+        ],
+        "connections": [
+            {
+                "from": "1",
+                "to": "2"
+            },
+            {
+                "from": "2",
+                "to": "3"
+            },
+            {
+                "from": "3",
+                "to": "4",
+                "label": "No"
+            },
+            {
+                "from": "3",
+                "to": "6",
+                "label": "Yes"
+            },
+            {
+                "from": "4",
+                "to": "5"
+            },
+            {
+                "from": "5",
+                "to": "6"
+            }
+        ]
+    }
 
-                logger.info(f"--- Matching Node {i+1} (ID: {node.get('id')}) ---")
-                search_results = search_scripts_by_description(description, top_k=1)
-                best_match = search_results[0] if search_results else None
-                
-                if best_match:
-                    node["data"] = {
-                        "description": description,
-                        "script": best_match['name'],
-                        "script_id": str(best_match['id'])
-                    }
-                else:
-                    node["data"] = {
-                        "description": description,
-                        "script": None,
-                        "script_id": "Not Found"
-                    }
+    return JSONResponse(content=hardcoded_response, status_code=200)
 
-        logger.info("✅  Successfully completed two-step SOP parsing.")
-        
-        return JSONResponse(content=structured_workflow, status_code=200)
-
-    except HTTPException:
-        raise
-    except Exception as e:
-        logger.exception("🔥  Error during SOP parsing workflow")
-        raise HTTPException(status_code=500, detail=f"An error occurred during AI parsing: {str(e)}")
-
+# ... existing code ...
 
 @app.delete("/scripts/delete/{script_id}")
 def delete_script(script_id: int = Path(..., ge=1)):
