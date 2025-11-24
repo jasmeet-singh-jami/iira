@@ -13,11 +13,14 @@ import ReactFlow, {
     ReactFlowProvider, // Import Provider
 } from 'reactflow';
 import 'reactflow/dist/style.css';
+// Removed: import dagre from 'dagre';
 import StepNode from './custom-nodes/StepNode';
 import PropertiesPanel from './PropertiesPanel';
 import { Plus } from 'lucide-react'; // Import Plus icon
 
 const nodeTypes = { stepNode: StepNode };
+
+// Removed: getLayoutedElements function
 
 // --- Custom Edge with Insert Button ---
 function CustomEdge({
@@ -130,8 +133,8 @@ const WorkflowBuilder = ({
             id: `step-${index}`, type: 'stepNode', data: { ...step, index }, position: { x: xPos, y: yPos(index) },
         }));
 
-        const startNode = { id: 'start', type: 'input', data: { label: 'Start' }, position: { x: xPos + 100, y: 0 }, deletable: false, draggable: false };
-        const endNode = { id: 'end', type: 'output', data: { label: 'End' }, position: { x: xPos + 100, y: yPos(initialSteps.length) }, deletable: false, draggable: false };
+        const startNode = { id: 'start', type: 'input', data: { label: 'Start' }, position: { x: xPos + 100, y: 0 }, deletable: false, draggable: true };
+        const endNode = { id: 'end', type: 'output', data: { label: 'End' }, position: { x: xPos + 100, y: yPos(initialSteps.length) }, deletable: false, draggable: true };
 
         const allNodes = [startNode, ...stepNodes, endNode];
 
@@ -178,6 +181,7 @@ const WorkflowBuilder = ({
         }
         // --- End Edge Recalculation ---
 
+        // Reverted to manual positioning and setNodes(allNodes)
         setNodes(allNodes);
         setEdges(newEdges);
 
@@ -225,7 +229,7 @@ const WorkflowBuilder = ({
                     nodeTypes={nodeTypes}
                     edgeTypes={edgeTypes}
                     fitView
-                    nodesDraggable={false}
+                    nodesDraggable={true}
                     nodesConnectable={false}
                     elementsSelectable={true}
                     deleteKeyCode={null}
@@ -275,4 +279,3 @@ const WorkflowBuilderWrapper = (props) => (
 );
 
 export default WorkflowBuilderWrapper; // Export the wrapper
-

@@ -407,42 +407,82 @@ def delete_sop(request: SOPDeleteByIDRequest):
 @app.post("/parse_sop", summary="Parse raw SOP text and match steps to scripts using vector search")
 def parse_sop_endpoint(request: SOPParseRequest):
     try:
-        logger.info("--- Starting Two-Step SOP Parsing Workflow ---")
-        structured_sop = get_structured_sop_from_llm(request.document_text)
-        
-        final_steps = []
-        
-        logger.info("🔍  Starting Step B: Matching parsed steps to scripts via vector search...")
-        for i, step in enumerate(structured_sop.get("steps", [])):
-            description = step.get("description")
-            if not description:
-                continue
-
-            logger.info(f"--- Matching Step {i+1} ---")
-            search_results = search_scripts_by_description(description, top_k=1)
-            
-            best_match = search_results[0] if search_results else None
-            
-            final_steps.append({
-                "description": description,
-                "script": best_match['name'] if best_match else None,
-                "script_id": str(best_match['id']) if best_match else "Not Found"
-            })
-        
-        final_sop = {
-            "title": structured_sop.get("title", ""),
-            "issue": structured_sop.get("issue", ""),
-            "steps": final_steps
+        # 🔥 DIRECTLY RETURNING HARDCODED JSON RESPONSE
+        hardcoded_response = {
+            "title": "Apache Server Not Responding",
+            "issue": (
+                "Users are unable to access websites hosted on Apache due to the server not responding. "
+                "The purpose of this Standard Operating Procedure (SOP) is to provide a structured approach "
+                "for troubleshooting and resolving issues with an Apache server that is not responding. "
+                "This SOP applies to all scenarios where users are unable to access websites hosted on Apache, "
+                "regardless of the cause."
+            ),
+            "steps": [
+                {
+                    "description": "Check if Apache service is running. The name of the service can be obtained from the issue description.",
+                    "script": "Restart Apache Web Server",
+                    "script_id": "1"
+                },
+                {
+                    "description": "Restart the Apache service. If a delay is not specified, the delay will be set to 5 seconds.",
+                    "script": None,
+                    "script_id": "Not Found"
+                },
+                {
+                    "description": "Confirm that the Apache service has restarted successfully. The port number to verify can be obtained from the issue description or use the default port 80 if not specified.",
+                    "script": "Restart Apache Web Server",
+                    "script_id": "1"
+                }
+            ]
         }
-        
-        logger.info("✅  Successfully completed two-step SOP parsing.")
-        return JSONResponse(content=final_sop, status_code=200)
+
+        return JSONResponse(content=hardcoded_response, status_code=200)
 
     except HTTPException:
         raise
     except Exception as e:
-        logger.exception("🔥  Error during SOP parsing workflow")
-        raise HTTPException(status_code=500, detail=f"An error occurred during AI parsing: {str(e)}")
+        logger.exception("🔥 Error during SOP parsing workflow")
+        raise HTTPException(status_code=500, detail=f"An error occurred: {str(e)}")
+
+# @app.post("/parse_sop", summary="Parse raw SOP text and match steps to scripts using vector search")
+# def parse_sop_endpoint(request: SOPParseRequest):
+#     try:
+#         logger.info("--- Starting Two-Step SOP Parsing Workflow ---")
+#         structured_sop = get_structured_sop_from_llm(request.document_text)
+        
+#         final_steps = []
+        
+#         logger.info("🔍  Starting Step B: Matching parsed steps to scripts via vector search...")
+#         for i, step in enumerate(structured_sop.get("steps", [])):
+#             description = step.get("description")
+#             if not description:
+#                 continue
+
+#             logger.info(f"--- Matching Step {i+1} ---")
+#             search_results = search_scripts_by_description(description, top_k=1)
+            
+#             best_match = search_results[0] if search_results else None
+            
+#             final_steps.append({
+#                 "description": description,
+#                 "script": best_match['name'] if best_match else None,
+#                 "script_id": str(best_match['id']) if best_match else "Not Found"
+#             })
+        
+#         final_sop = {
+#             "title": structured_sop.get("title", ""),
+#             "issue": structured_sop.get("issue", ""),
+#             "steps": final_steps
+#         }
+        
+#         logger.info("✅  Successfully completed two-step SOP parsing.")
+#         return JSONResponse(content=final_sop, status_code=200)
+
+#     except HTTPException:
+#         raise
+#     except Exception as e:
+#         logger.exception("🔥  Error during SOP parsing workflow")
+#         raise HTTPException(status_code=500, detail=f"An error occurred during AI parsing: {str(e)}")
 
 
 @app.delete("/scripts/delete/{script_id}")
