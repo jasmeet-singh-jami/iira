@@ -1,4 +1,3 @@
-// src/App.js
 import React, { useState, useEffect } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import Sidebar from './components/Sidebar';
@@ -8,7 +7,7 @@ import RunbookDeletion from './components/RunbookDeletion';
 import RunbookIngestion from './components/RunbookIngestion';
 import ScriptsPage from './components/ScriptsPage';
 import AgentTrainer from './components/AgentTrainer';
-import ManagementDashboard from './components/ManagementDashboard'; // Changed import
+import ManagementDashboard from './components/ManagementDashboard';
 import Modal from './components/Modal';
 import AddNewScriptModal from './components/AddNewScriptModal';
 import ConfirmationModal from './components/ConfirmationModal';
@@ -26,13 +25,42 @@ const createNewStep = () => ({
     isMatching: false, isCreating: false
 });
 
+// Helper to convert legacy linear steps to Graph format (for Generator/Manual)
+const convertLinearStepsToGraph = (steps) => {
+    const nodes = {};
+    const startId = 'start';
+    
+    nodes[startId] = { type: 'input', next: 'step-0' };
+
+    steps.forEach((step, index) => {
+        const id = `step-${index}`;
+        const nextId = index < steps.length - 1 ? `step-${index + 1}` : 'end';
+        
+        nodes[id] = {
+            type: 'step',
+            name: step.description.substring(0, 20) + '...',
+            description: step.description,
+            script: step.script,
+            script_id: step.script_id,
+            next: nextId
+        };
+    });
+
+    nodes['end'] = { type: 'output' };
+
+    return { start_node_id: startId, nodes };
+};
+
 function App() {
     const [activePage, setActivePage] = useState('dashboard');
     const [ingestionTitle, setIngestionTitle] = useState('');
     const [ingestionIssue, setIngestionIssue] = useState('');
     const [ingestionTags, setIngestionTags] = useState('');
     const [ingestionSteps, setIngestionSteps] = useState([createNewStep()]);
+    // ADDED: State for Graph Data
+    const [ingestionGraphData, setIngestionGraphData] = useState(null);
     const [ingestionRawText, setIngestionRawText] = useState('');
+    
     const [trainerIncidentNumber, setTrainerIncidentNumber] = useState('');
     const [trainerShortDesc, setTrainerShortDesc] = useState('');
     const [trainerDesc, setTrainerDesc] = useState('');
@@ -86,15 +114,22 @@ function App() {
      };
     const closeConfirmationModal = () => { setConfirmationModal({ isOpen: false, title: '', message: '', onConfirm: () => {} }); };
 
+    // --- UPDATED: RESET FORM LOGIC ---
     const resetIngestionForm = () => {
-        setIngestionTitle(''); setIngestionIssue(''); setIngestionTags('');
-        setIngestionSteps([createNewStep()]); setIngestionRawText('');
+        setIngestionTitle(''); 
+        setIngestionIssue(''); 
+        setIngestionTags('');
+        setIngestionSteps([createNewStep()]); 
+        setIngestionGraphData(null); // Fix: Clear graph data to reset view
+        setIngestionRawText('');
     };
+
     const handleDraftAndGenerateFromHistory = async (incident) => {
          const description = `Incident ${incident.incident_number}: ${incident.incident_data.short_description}\n\nFull Description:\n${incident.incident_data.description || ''}`;
          setIngestionRawText(description);
          setActivePage('onboard-runbook');
      };
+
     const handleGenerateRunbook = async () => {
         if (!ingestionRawText.trim()) { setModal({ visible: true, message: 'Please enter a problem description.' }); return; }
         setIsGenerating(true);
@@ -104,37 +139,48 @@ function App() {
                 setClarification({ isNeeded: true, questions: response.questions });
                 setUserAnswers(response.questions.reduce((acc, q) => ({ ...acc, [q]: '' }), {}));
             } else if (response.status === 'sop_generated') {
-                setIngestionTitle(response.title); setIngestionIssue(response.issue);
-                setIngestionSteps(response.steps.map(s => ({ ...createNewStep(), ...s })));
+                setIngestionTitle(response.title); 
+                setIngestionIssue(response.issue);
+                // Convert linear steps to graph for the builder
+                const graph = convertLinearStepsToGraph(response.steps);
+                setIngestionGraphData(graph);
                 setModal({ visible: true, message: 'Agent draft generated successfully!' });
             }
         } catch (error) { setModal({ visible: true, message: error.message }); }
         finally { setIsGenerating(false); }
     };
+
     const handleAnswerSubmission = async () => {
         setIsGenerating(true); setClarification({ isNeeded: false, questions: [] });
         try {
             const response = await generateSOPApi(ingestionRawText, userAnswers);
             if (response.status === 'sop_generated') {
-                setIngestionTitle(response.title); setIngestionIssue(response.issue);
-                setIngestionSteps(response.steps.map(s => ({ ...createNewStep(), ...s })));
+                setIngestionTitle(response.title); 
+                setIngestionIssue(response.issue);
+                const graph = convertLinearStepsToGraph(response.steps);
+                setIngestionGraphData(graph);
                 setModal({ visible: true, message: 'Agent draft generated!' });
             }
         } catch (error) { setModal({ visible: true, message: error.message }); }
         finally { setIsGenerating(false); }
     };
+
+    // --- UPDATED: PARSE LOGIC ---
     const handleParseDocument = async () => {
         if (!ingestionRawText.trim()) { setModal({ visible: true, message: 'Please paste text to parse.' }); return; }
         setIsParsing(true);
         try {
             const parsedData = await parseSOPApi(ingestionRawText);
-            setIngestionTitle(parsedData.title); setIngestionIssue(parsedData.issue);
-            setIngestionSteps(parsedData.steps.map(s => ({ ...createNewStep(), ...s })));
+            setIngestionTitle(parsedData.title); 
+            setIngestionIssue(parsedData.issue);
+            setIngestionGraphData(parsedData); // Use parsed graph directly
             setModal({ visible: true, message: 'Agent parsed successfully!' });
         } catch (error) { setModal({ visible: true, message: `Failed to parse Agent: ${error.message}` }); }
         finally { setIsParsing(false); }
     };
+
      const handleRematchStepScript = async (stepIndex) => {
+        // Note: This legacy function might need updates for graph mode if accessed directly
         if (stepIndex < 0 || stepIndex >= ingestionSteps.length) return;
         const currentStep = ingestionSteps[stepIndex];
         if (!currentStep?.description?.trim()) { setModal({ visible: true, message: 'Please enter step description.' }); return; }
@@ -145,6 +191,7 @@ function App() {
             setModal({ visible: true, message: matchResult.script_name ? `Match: ${matchResult.script_name}` : 'No match found.' });
         } catch (error) { setModal({ visible: true, message: error.message }); setIngestionSteps(s => s.map((step, idx) => idx === stepIndex ? { ...step, isMatching: false } : step)); }
     };
+
     const handleCreateScriptForStep = async (stepIndex) => {
          if (stepIndex < 0 || stepIndex >= ingestionSteps.length) return;
         const targetStep = ingestionSteps[stepIndex];
@@ -158,6 +205,7 @@ function App() {
         } catch (error) { setModal({ visible: true, message: error.message }); }
         finally { setIngestionSteps(s => s.map((step, idx) => idx === stepIndex ? { ...step, isCreating: false } : step)); }
     };
+
     const onIngestionStepsChange = (newSteps) => { setIngestionSteps(newSteps); };
     const handleAddIngestionStep = () => { setIngestionSteps(s => [ ...s, createNewStep() ]); };
     const handleDeleteIngestionStep = (indexToDelete) => {
@@ -170,13 +218,34 @@ function App() {
     const handleInsertIngestionStep = (indexToInsertAfter) => {
         setIngestionSteps(s => { const newS = [...s]; newS.splice(indexToInsertAfter + 1, 0, createNewStep()); return newS; });
     };
-    const uploadRunbook = async () => {
+
+    // --- UPDATED: UPLOAD LOGIC ---
+    const uploadRunbook = async (graphPayload = null) => {
         if (!ingestionTitle.trim()) { setModal({ visible: true, message: 'Agent Title cannot be empty.' }); return; }
         if (!ingestionIssue.trim()) { setModal({ visible: true, message: 'Issue Description cannot be empty.' }); return; }
-        const validSteps = ingestionSteps.filter(step => step.description.trim() && step.description !== 'New Step').map(({ isMatching, isCreating, index, ...rest }) => rest);
-        if (validSteps.length === 0) { setModal({ visible: true, message: 'Please provide valid step descriptions.' }); return; }
+
+        let sopPayload = {
+            title: ingestionTitle,
+            issue: ingestionIssue,
+            tags: ingestionTags.split(',').map(t=>t.trim()).filter(t => t),
+        };
+
+        // Case 1: Graph Payload (From Workflow Builder)
+        if (graphPayload && graphPayload.nodes) {
+             sopPayload = {
+                 ...sopPayload,
+                 nodes: graphPayload.nodes,
+                 start_node_id: graphPayload.start_node_id || 'start'
+             };
+        } 
+        // Case 2: Legacy Steps (Fallback)
+        else {
+            const validSteps = ingestionSteps.filter(step => step.description.trim() && step.description !== 'New Step').map(({ isMatching, isCreating, index, ...rest }) => rest);
+            if (validSteps.length === 0) { setModal({ visible: true, message: 'Please provide valid step descriptions.' }); return; }
+            sopPayload.steps = validSteps;
+        }
+
         try {
-            const sopPayload = { title: ingestionTitle, issue: ingestionIssue, tags: ingestionTags.split(',').map(t=>t.trim()).filter(t => t), steps: validSteps };
             await uploadSOPApi(sopPayload);
             setModal({ visible: true, message: 'Agent ingested successfully!' });
             resetIngestionForm();
@@ -213,12 +282,8 @@ function App() {
             recommended_agent_title: recommendedAgent?.title || null,
             search_score: recommendedAgent?.score || null,
             user_feedback_type: feedbackType,
-            correct_agent_id: feedbackType === 'Correct'
-                ? recommendedAgent?.id || null
-                : selectedCorrectAgent?.id || null,
-            correct_agent_title: feedbackType === 'Correct'
-                ? recommendedAgent?.title || null
-                : selectedCorrectAgent?.name || null,
+            correct_agent_id: feedbackType === 'Correct' ? recommendedAgent?.id || null : selectedCorrectAgent?.id || null,
+            correct_agent_title: feedbackType === 'Correct' ? recommendedAgent?.title || null : selectedCorrectAgent?.name || null,
             session_id: feedbackSessionId
         };
         try {
@@ -243,17 +308,15 @@ function App() {
 
     const renderPage = () => {
         switch (activePage) {
-            case 'dashboard':
-                return <Dashboard setActivePage={setActivePage} />;
-            case 'history':
-                return <History onDraftRunbook={handleDraftAndGenerateFromHistory} />;
-            case 'manage-runbooks':
-                return <RunbookDeletion />;
+            case 'dashboard': return <Dashboard setActivePage={setActivePage} />;
+            case 'history': return <History onDraftRunbook={handleDraftAndGenerateFromHistory} />;
+            case 'manage-runbooks': return <RunbookDeletion />;
             case 'onboard-runbook':
                  return <RunbookIngestion
                             title={ingestionTitle} setTitle={setIngestionTitle}
                             issue={ingestionIssue} setIssue={setIngestionIssue}
                             tags={ingestionTags} setTags={setIngestionTags}
+                            graphData={ingestionGraphData}
                             steps={ingestionSteps}
                             onStepsChange={onIngestionStepsChange}
                             availableScripts={availableScripts}
@@ -272,10 +335,8 @@ function App() {
                             onInsertStep={handleInsertIngestionStep}
                             setConfirmationModal={setConfirmationModal}
                         />;
-            case 'scripts':
-                return <ScriptsPage setConfirmationModal={setConfirmationModal}/>;
-            case 'management': // Changed case
-                return <ManagementDashboard />;
+            case 'scripts': return <ScriptsPage setConfirmationModal={setConfirmationModal}/>;
+            case 'management': return <ManagementDashboard />;
             case 'testbed':
                 return <AgentTrainer
                             incidentNumber={trainerIncidentNumber}
@@ -293,8 +354,7 @@ function App() {
                             feedbackSessionId={feedbackSessionId}
                             clearRecommendations={clearTrainerRecommendations}
                         />;
-            default:
-                return <Dashboard setActivePage={setActivePage} />;
+            default: return <Dashboard setActivePage={setActivePage} />;
         }
     };
 

@@ -1,4 +1,3 @@
-// src/components/PropertiesPanel.jsx
 import React, { useState, useEffect } from 'react';
 import { X, Search, Sparkles, Plus, Loader2, Trash2 } from 'lucide-react';
 import SearchableDropdown from './SearchableDropdown';
@@ -17,60 +16,44 @@ const PropertiesPanel = ({
     const [description, setDescription] = useState(nodeData?.description || '');
     const [scriptId, setScriptId] = useState(nodeData?.script_id || null);
 
-    // Effect to update local state if the selected node changes externally
-     useEffect(() => {
-        console.log("PropertiesPanel receiving new nodeData:", nodeData); // Debug log
+    // Sync local state with nodeData when a new node is selected
+    useEffect(() => {
         if (nodeData) {
             setDescription(nodeData.description);
             setScriptId(nodeData.script_id);
-        } else {
-            // Reset state if node is deselected
-            setDescription('');
-            setScriptId(null);
         }
-    }, [nodeData]); // Rerun when nodeData changes
+    }, [nodeData]);
 
-
-    // Debounced update for description changes
+    // Debounced update for description
     useEffect(() => {
-        // Only trigger update if local state differs from prop state and nodeData exists
         if (nodeData && description !== nodeData.description) {
             const handler = setTimeout(() => {
-                console.log("PropertiesPanel updating description:", description); // Debug log
                 onUpdate({ description });
-            }, 500); // 500ms delay
-            // Cleanup function to clear timeout if description changes again quickly
+            }, 500);
             return () => clearTimeout(handler);
         }
-    }, [description, nodeData, onUpdate]); // Include nodeData in dependency array
+    }, [description, nodeData, onUpdate]);
 
-    // --- UPDATED: Immediate update for script ID changes ---
-    useEffect(() => {
-        // Only run if nodeData exists and scriptId has changed from the initial nodeData prop
-        if (nodeData && scriptId !== nodeData.script_id) {
-            // Find the selected script object to get its name
-            const selectedScript = availableScripts.find(script => script.id === scriptId);
-            const scriptName = selectedScript ? selectedScript.name : null; // Get name or null
+    // Handler for Script Selection - UPDATES PARENT IMMEDIATELY
+    const handleScriptChange = (newScriptId) => {
+        setScriptId(newScriptId);
+        
+        // Find the selected script object to get its name
+        const selectedScript = availableScripts.find(script => script.id === newScriptId);
+        const scriptName = selectedScript ? selectedScript.name : null;
 
-            console.log("PropertiesPanel updating scriptId and script name:", scriptId, scriptName); // Debug log
+        // Immediate update to parent state
+        onUpdate({
+            script_id: newScriptId,
+            script: scriptName
+        });
+    };
 
-            // Call onUpdate with BOTH script_id and the script name
-            onUpdate({
-                script_id: scriptId,
-                script: scriptName // Pass the name as well
-            });
-        }
-        // Ensure availableScripts is a dependency if used inside
-    }, [scriptId, nodeData, onUpdate, availableScripts]);
-    // --- END UPDATE ---
-
-    // --- Delete Handler ---
     const handleDelete = () => {
         if (!setConfirmationModal || nodeData?.index === undefined) {
              console.error("Cannot delete: setConfirmationModal or nodeData.index is missing.");
              return;
         }
-        console.log("PropertiesPanel triggering confirmation modal for index:", nodeData.index);
 
         setConfirmationModal({
             isOpen: true,
@@ -78,17 +61,14 @@ const PropertiesPanel = ({
             message: `Are you sure you want to delete Step ${nodeData.index + 1}?`,
             onConfirm: () => {
                 if (onDeleteStep) {
-                    console.log("Confirmation received, calling onDeleteStep for index:", nodeData.index);
                     onDeleteStep(nodeData.index);
-                    onClose(); // Close the properties panel after confirmation
+                    onClose(); 
                 }
             }
         });
     };
-    // --- END Delete Handler ---
 
     if (!nodeData) {
-        // ... (render placeholder if no node selected - unchanged) ...
          return (
              <div className="w-96 border-l bg-white p-4 flex flex-col shadow-lg h-full">
                  <div className="flex justify-end items-center pb-4 border-b mb-4">
@@ -105,11 +85,10 @@ const PropertiesPanel = ({
         );
     }
 
-    // --- REST OF THE COMPONENT REMAINS THE SAME ---
     return (
         <div className="w-96 border-l bg-white p-4 flex flex-col shadow-lg h-full">
             <div className="flex justify-between items-center pb-4 border-b mb-4">
-                <h3 className="font-bold text-lg text-gray-800">Edit Step {nodeData.index + 1}</h3>
+                <h3 className="font-bold text-lg text-gray-800">Edit Step {typeof nodeData.index === 'number' ? nodeData.index + 1 : ''}</h3>
                 <div className="flex items-center space-x-1">
                      <button
                         onClick={handleDelete}
@@ -144,9 +123,9 @@ const PropertiesPanel = ({
                     <label className="text-sm font-semibold text-gray-700 mb-1 block">Associated Worker Task</label>
                      <div className="relative flex-grow">
                         <SearchableDropdown
-                            options={availableScripts} // Worker Tasks list
+                            options={availableScripts} 
                             value={scriptId || ''}
-                            onChange={(value) => setScriptId(value)} // Update local state
+                            onChange={handleScriptChange} // Use new direct handler
                             placeholder="Select a Worker Task (Optional)"
                         />
                     </div>
@@ -190,7 +169,6 @@ const PropertiesPanel = ({
     );
 };
 
-// Simple CSS for custom scrollbar (optional, can be in App.css)
 const scrollbarStyle = `
 .custom-scrollbar::-webkit-scrollbar { width: 6px; }
 .custom-scrollbar::-webkit-scrollbar-track { background: #f1f1f1; border-radius: 3px; }
@@ -205,4 +183,3 @@ if (!document.getElementById('custom-scrollbar-style')) {
 }
 
 export default PropertiesPanel;
-

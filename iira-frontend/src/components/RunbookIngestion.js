@@ -1,4 +1,3 @@
-// src/components/RunbookIngestion.js
 import React from 'react';
 import { BrainCircuit, Wand2, RefreshCcw, Loader2 } from 'lucide-react';
 import WorkflowBuilder from './WorkflowBuilder'; // Import the wrapper
@@ -12,6 +11,7 @@ const RunbookIngestion = ({
     setTags,
     steps,
     onStepsChange,
+    graphData, // <<< New Prop for Graph-based workflows
     availableScripts, // Represents Worker Tasks
     onAddNewScript,
     uploadRunbook,
@@ -27,12 +27,16 @@ const RunbookIngestion = ({
     onAddStep,
     onDeleteStep,
     onInsertStep,
-    setConfirmationModal // <<< RECEIVE PROP
+    setConfirmationModal 
 }) => {
 
-    console.log("RunbookIngestion rendering or received props. Type of onInsertStep:", typeof onInsertStep);
+    console.log("RunbookIngestion rendering. Has graphData:", !!graphData);
 
-    const isWorkflowView = steps.length > 1 || (steps.length === 1 && steps[0].description !== 'New Step' && steps[0].description !== '');
+    // Update logic: View mode is active if we have Graph Data OR if we have valid Steps
+    const hasGraphData = graphData && graphData.nodes && Object.keys(graphData.nodes).length > 0;
+    const hasLegacySteps = steps.length > 1 || (steps.length === 1 && steps[0].description !== 'New Step' && steps[0].description !== '');
+    
+    const isWorkflowView = hasGraphData || hasLegacySteps;
 
     return (
         <div className="p-8">
@@ -111,9 +115,11 @@ const RunbookIngestion = ({
                             className="w-full px-4 py-3 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 transition duration-200"
                          />
                     </div>
-                    {/* <<< PASS PROP DOWN HERE >>> */}
+                    
+                    {/* <<< Updated WorkflowBuilder to receive graphData >>> */}
                     <WorkflowBuilder
-                        key={steps.length}
+                        key={hasGraphData ? 'graph-mode' : steps.length} // Force re-mount if switching modes
+                        graphData={graphData} // Pass the graph data
                         initialSteps={steps}
                         availableScripts={availableScripts}
                         onStepsChange={onStepsChange}
@@ -124,7 +130,7 @@ const RunbookIngestion = ({
                         onAddStep={onAddStep}
                         onDeleteStep={onDeleteStep}
                         onInsertStep={onInsertStep}
-                        setConfirmationModal={setConfirmationModal} // Pass setter down
+                        setConfirmationModal={setConfirmationModal}
                     />
                 </div>
             )}
@@ -133,4 +139,3 @@ const RunbookIngestion = ({
 };
 
 export default RunbookIngestion;
-

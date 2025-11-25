@@ -409,32 +409,53 @@ def parse_sop_endpoint(request: SOPParseRequest):
     try:
         # 🔥 DIRECTLY RETURNING HARDCODED JSON RESPONSE
         hardcoded_response = {
-            "title": "Apache Server Not Responding",
-            "issue": (
-                "Users are unable to access websites hosted on Apache due to the server not responding. "
-                "The purpose of this Standard Operating Procedure (SOP) is to provide a structured approach "
-                "for troubleshooting and resolving issues with an Apache server that is not responding. "
-                "This SOP applies to all scenarios where users are unable to access websites hosted on Apache, "
-                "regardless of the cause."
-            ),
-            "steps": [
-                {
-                    "description": "Check if Apache service is running. The name of the service can be obtained from the issue description.",
-                    "script": "Restart Apache Web Server",
-                    "script_id": "1"
-                },
-                {
-                    "description": "Restart the Apache service. If a delay is not specified, the delay will be set to 5 seconds.",
-                    "script": None,
-                    "script_id": "Not Found"
-                },
-                {
-                    "description": "Confirm that the Apache service has restarted successfully. The port number to verify can be obtained from the issue description or use the default port 80 if not specified.",
-                    "script": "Restart Apache Web Server",
-                    "script_id": "1"
-                }
-            ]
+    "title": "Apache Server Not Responding",
+    "issue": "Users are unable to access websites hosted on Apache...",
+    "start_node_id": "start",
+    "nodes": {
+        "start": {
+            "type": "input",
+            "next": "step-1"
+        },
+        "step-1": {
+            "type": "step",
+            "name": "Check Service Status",
+            "description": "Check if Apache service is running. The name of the service can be obtained from the issue description.",
+            "script": "Check Apache Service Status",
+            "script_id": "1",
+            "next": "decision-1"
+        },
+        "decision-1": {
+            "type": "decision",
+            "name": "Is Service Running?",
+            "description": "Check if Apache service is running.",
+            "condition": "Output of step-1 is 'Running'?",
+            "paths": {
+                "true": "step-3_confirm",   
+                "false": "step-2_restart"
+            }
+        },
+        "step-2_restart": {
+            "type": "step",
+            "name": "Restart Apache Service",
+            "description": "Restart the Apache service. If a delay is not specified, the delay will be set to 5 seconds.",
+            "script": "",
+            "script_id": "Not Found",
+            "next": "step-3_confirm"
+        },
+        "step-3_confirm": {
+            "type": "step",
+            "name": "Confirm Service Restart",
+            "description": "Confirm that the Apache service has restarted successfully. The port number to verify can be obtained from the issue description or use the default port 80 if not specified.",
+            "script": "Restart Apache Web Server",
+            "script_id": "1",
+            "next": "end"
+        },
+        "end": {
+            "type": "output"
         }
+    }
+}
 
         return JSONResponse(content=hardcoded_response, status_code=200)
 

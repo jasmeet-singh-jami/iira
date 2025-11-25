@@ -2,78 +2,163 @@ import React, { useState, useEffect, useCallback, useMemo, useRef } from 'react'
 import ReactFlow, {
     useNodesState,
     useEdgesState,
-    addEdge,
     Controls,
     Background,
     MarkerType,
-    getBezierPath, // Import path function
-    BaseEdge,      // Import BaseEdge for custom edge
-    EdgeLabelRenderer, // To render label/button on edge
-    useReactFlow,   // Hook to access reactflow instance
-    ReactFlowProvider, // Import Provider
+    getBezierPath,
+    BaseEdge,
+    EdgeLabelRenderer,
+    useReactFlow,
+    ReactFlowProvider,
 } from 'reactflow';
 import 'reactflow/dist/style.css';
-// Removed: import dagre from 'dagre';
+import dagre from 'dagre'; 
+
 import StepNode from './custom-nodes/StepNode';
+import DecisionNode from './custom-nodes/DecisionNode';
 import PropertiesPanel from './PropertiesPanel';
-import { Plus } from 'lucide-react'; // Import Plus icon
+import { Plus } from 'lucide-react'; 
 
-const nodeTypes = { stepNode: StepNode };
+const nodeTypes = { stepNode: StepNode, decisionNode: DecisionNode };
 
-// Removed: getLayoutedElements function
+// --- Dagre Utility Function for Layout ---
+const nodeWidth = 250; 
+const nodeHeight = 100; 
+
+const getLayoutedElements = (nodes, edges, direction = 'TB') => {
+    const dagreGraph = new dagre.graphlib.Graph();
+    dagreGraph.setDefaultEdgeLabel(() => ({}));
+    dagreGraph.setGraph({ rankdir: direction, ranksep: 100, nodesep: 80 });
+
+    nodes.forEach((node) => {
+        dagreGraph.setNode(node.id, { 
+            width: node.data.width || nodeWidth, 
+            height: node.data.height || nodeHeight 
+        });
+    });
+
+    edges.forEach((edge) => {
+        dagreGraph.setEdge(edge.source, edge.target, { minlen: 1, weight: 1 }); 
+    });
+
+    dagre.layout(dagreGraph);
+
+    const layoutedNodes = nodes.map((node) => {
+        const nodeWithLayout = dagreGraph.node(node.id);
+        
+        node.position = {
+            x: nodeWithLayout.x - (node.data.width || nodeWidth) / 2,
+            y: nodeWithLayout.y - (node.data.height || nodeHeight) / 2,
+        };
+
+        if (node.id === 'start' || node.id === 'end') {
+            node.draggable = false;
+        } else {
+            node.draggable = true;
+        }
+
+        return node;
+    });
+
+    return { layoutedNodes, layoutedEdges: edges };
+};
+
+// --- Helper: Reconstruct Backend Graph from Visual Nodes/Edges ---
+const reconstructGraph = (nodes, edges) => {
+    const nodesMap = {};
+    let startNodeId = 'start'; 
+
+    nodes.forEach(node => {
+        // Extract backend data, ignoring visual props like width/height/label if redundant
+        const { label, width, height, ...backendData } = node.data; 
+        
+        const cleanNode = { ...backendData };
+        
+        // Normalize types
+        if (node.type === 'stepNode') cleanNode.type = 'step';
+        if (node.type === 'decisionNode') cleanNode.type = 'decision';
+        if (node.type === 'input') { cleanNode.type = 'input'; startNodeId = node.id; }
+        if (node.type === 'output') cleanNode.type = 'output';
+
+        // Reset connections to be rebuilt from edges
+        cleanNode.next = null;
+        if (cleanNode.type === 'decision') cleanNode.paths = {};
+
+        nodesMap[node.id] = cleanNode;
+    });
+
+    edges.forEach(edge => {
+        const sourceNode = nodesMap[edge.source];
+        if (!sourceNode) return;
+
+        if (sourceNode.type === 'decision') {
+            if (edge.sourceHandle) {
+                // Ensure paths object exists
+                if (!sourceNode.paths) sourceNode.paths = {};
+                sourceNode.paths[edge.sourceHandle] = edge.target;
+            }
+        } else {
+            sourceNode.next = edge.target;
+        }
+    });
+
+    return { start_node_id: startNodeId, nodes: nodesMap };
+};
+
 
 // --- Custom Edge with Insert Button ---
 function CustomEdge({
-    id,
-    sourceX,
-    sourceY,
-    targetX,
-    targetY,
-    sourcePosition,
-    targetPosition,
-    style = {},
-    markerEnd,
-    data, // We'll pass the onInsertStep function and sourceIndex here
+    id, sourceX, sourceY, targetX, targetY, sourcePosition, targetPosition, style = {}, markerEnd, data, 
 }) {
-    // Note: useReactFlow hook cannot be used directly inside the edge component
-    // If complex interactions are needed, pass necessary functions via `data` prop.
-    const [edgePath, labelX, labelY] = getBezierPath({
-        sourceX,
-        sourceY,
-        sourcePosition,
-        targetX,
-        targetY,
-        targetPosition,
-    });
+    const [edgePath, labelX, labelY] = getBezierPath({ sourceX, sourceY, sourcePosition, targetX, targetY, targetPosition });
+    
+    const isDecisionPath = data?.sourceHandle && data.sourceHandle !== 'input';
+    const edgeLabel = isDecisionPath ? data.sourceHandle.toUpperCase() : null;
+    const isEdgeToEndNode = data?.targetId === 'end';
 
     const onEdgeClick = (event) => {
-        event.stopPropagation(); // Prevent node selection when clicking button
-        // Check if data and the function exist before calling
-        if (data && typeof data.onInsertStep === 'function' && data.sourceIndex !== undefined) {
-             console.log("CustomEdge attempting to call onInsertStep for index:", data.sourceIndex);
-             data.onInsertStep(data.sourceIndex);
+        event.stopPropagation();
+        if (data && typeof data.onInsertStep === 'function' && data.sourceId) { 
+             data.onInsertStep(data.sourceId, data.sourceHandle);
         } else {
-             // Log more details if the function is missing
-             console.error("CustomEdge Error: Missing data for insert.", { dataExists: !!data, onInsertStepType: typeof data?.onInsertStep, sourceIndex: data?.sourceIndex });
+             console.error("CustomEdge Error: Missing data for insert.", data);
         }
     };
 
-    // Don't show insert button for the edge going into the 'End' node
-    const isEdgeToEndNode = data?.targetId === 'end';
-
     return (
         <>
-            <BaseEdge path={edgePath} markerEnd={markerEnd} style={style} id={id} />
-            {/* Conditionally render the button only if not connected to the 'end' node */}
+            <BaseEdge path={edgePath} markerEnd={markerEnd} style={{ ...style, strokeWidth: isDecisionPath ? 3 : 2 }} id={id} />
+
+            {edgeLabel && (
+                <EdgeLabelRenderer>
+                    <div
+                        style={{
+                            position: 'absolute',
+                            transform: `translate(-50%, -50%) translate(${labelX}px,${labelY}px)`,
+                            pointerEvents: 'none',
+                            fontSize: 10,
+                            fontWeight: 'bold',
+                            padding: '2px 6px',
+                            backgroundColor: '#fff',
+                            border: '1px solid #ccc',
+                            borderRadius: 4
+                        }}
+                        className="nodrag nopan"
+                    >
+                        {edgeLabel}
+                    </div>
+                </EdgeLabelRenderer>
+            )}
+
             {!isEdgeToEndNode && (
                 <EdgeLabelRenderer>
                     <div
                         style={{
                             position: 'absolute',
                             transform: `translate(-50%, -50%) translate(${labelX}px,${labelY}px)`,
-                            pointerEvents: 'all', // Make the button clickable
+                            pointerEvents: 'all',
                         }}
-                        className="nodrag nopan absolute z-10" // Ensure button is above edge
+                        className="nodrag nopan absolute z-10"
                     >
                         <button
                             className="p-1 bg-green-500 text-white rounded-full shadow-md hover:bg-green-600 focus:outline-none focus:ring-2 focus:ring-green-400 transition"
@@ -88,16 +173,103 @@ function CustomEdge({
         </>
     );
 }
-// --- END Custom Edge ---
 
-// Define edge types map
 const edgeTypes = {
     custom: CustomEdge,
 };
 
 
+const buildFlowFromGraph = (graphData, onInsertStep) => {
+    const { nodes: graphNodes, start_node_id } = graphData;
+    const initialNodes = [];
+    const initialEdges = [];
+    const visited = new Set();
+    const queue = [start_node_id];
+
+    const edgeStyle = { stroke: '#6b7280', strokeWidth: 2 };
+    const markerEnd = { type: MarkerType.ArrowClosed, width: 20, height: 20, color: '#6b7280'};
+
+    const typeMap = {
+        'input': { rfType: 'input', width: 100, height: 40 },
+        'output': { rfType: 'output', width: 100, height: 40 },
+        'step': { rfType: 'stepNode', width: nodeWidth, height: nodeHeight },
+        'decision': { rfType: 'decisionNode', width: nodeWidth, height: nodeHeight },
+    };
+
+    while (queue.length > 0) {
+        const sourceId = queue.shift();
+        if (visited.has(sourceId)) continue;
+        visited.add(sourceId);
+
+        const sourceNodeData = graphNodes[sourceId];
+        if (!sourceNodeData) continue;
+        
+        const typeInfo = typeMap[sourceNodeData.type] || typeMap['step'];
+        
+        const rfNode = {
+            id: sourceId,
+            type: typeInfo.rfType,
+            data: { 
+                ...sourceNodeData, 
+                label: sourceNodeData.name || sourceId, 
+                width: typeInfo.width, 
+                height: typeInfo.height 
+            },
+            position: { x: 0, y: 0 }, 
+            deletable: sourceNodeData.type !== 'input' && sourceNodeData.type !== 'output',
+            draggable: true, 
+        };
+        initialNodes.push(rfNode);
+
+        let connections = [];
+        if (sourceNodeData.type === 'decision' && sourceNodeData.paths) {
+            connections = Object.entries(sourceNodeData.paths).map(([handle, targetId]) => ({
+                targetId,
+                sourceHandle: handle 
+            }));
+        } else if (sourceNodeData.next) {
+            connections.push({
+                targetId: sourceNodeData.next,
+                sourceHandle: null
+            });
+        }
+        
+        connections.forEach(({ targetId, sourceHandle }) => {
+            if (targetId) {
+                const edgeId = sourceHandle 
+                    ? `e-${sourceId}-${sourceHandle}-${targetId}` 
+                    : `e-${sourceId}-${targetId}`;
+
+                initialEdges.push({
+                    id: edgeId,
+                    source: sourceId,
+                    target: targetId,
+                    sourceHandle: sourceHandle,
+                    type: 'custom',
+                    animated: false,
+                    style: edgeStyle,
+                    markerEnd: markerEnd,
+                    data: { 
+                        onInsertStep: onInsertStep,
+                        sourceId: sourceId, 
+                        targetId: targetId,
+                        sourceHandle: sourceHandle
+                    }
+                });
+
+                if (!visited.has(targetId)) {
+                    queue.push(targetId);
+                }
+            }
+        });
+    }
+
+    return { initialNodes, initialEdges };
+}
+
+
 const WorkflowBuilder = ({
-    initialSteps,
+    graphData,    
     availableScripts,
     onStepsChange,
     onSave,
@@ -105,9 +277,9 @@ const WorkflowBuilder = ({
     onRematchStep,
     onCreateScript,
     onAddStep,
-    onDeleteStep, // <<< RECEIVE PROP
-    onInsertStep, // <<< RECEIVE PROP
-    setConfirmationModal // <<< RECEIVE PROP
+    onDeleteStep, 
+    onInsertStep, 
+    setConfirmationModal
 }) => {
     const [nodes, setNodes, onNodesChange] = useNodesState([]);
     const [edges, setEdges, onEdgesChange] = useEdgesState([]);
@@ -115,104 +287,66 @@ const WorkflowBuilder = ({
     const reactFlowWrapper = useRef(null);
     const { fitView } = useReactFlow();
 
-    // <<< ADDED DEBUG LOG >>>
-    console.log("WorkflowBuilder rendering or received props. Type of onInsertStep:", typeof onInsertStep);
-
-    // Recalculate Nodes and Edges when initialSteps changes
+    // Recalculate Nodes and Edges when graphData changes
     useEffect(() => {
-        // <<< ADDED DEBUG LOG INSIDE EFFECT >>>
-        console.log("WorkflowBuilder useEffect for initialSteps running. Type of onInsertStep:", typeof onInsertStep);
-        if (typeof onInsertStep !== 'function') {
-            console.error("!!! onInsertStep is NOT a function inside useEffect !!!");
+        if (!graphData || !graphData.nodes || !graphData.start_node_id) {
+            setNodes([]);
+            setEdges([]);
+            return;
         }
 
-        const yPos = (index) => 100 + index * 150;
-        const xPos = 150;
+        const { initialNodes, initialEdges } = buildFlowFromGraph(graphData, onInsertStep);
+        
+        const { layoutedNodes, layoutedEdges } = getLayoutedElements(
+            initialNodes, 
+            initialEdges, 
+            'TB' 
+        );
+        
+        setNodes(layoutedNodes);
+        setEdges(layoutedEdges);
 
-        const stepNodes = initialSteps.map((step, index) => ({
-            id: `step-${index}`, type: 'stepNode', data: { ...step, index }, position: { x: xPos, y: yPos(index) },
-        }));
-
-        const startNode = { id: 'start', type: 'input', data: { label: 'Start' }, position: { x: xPos + 100, y: 0 }, deletable: false, draggable: true };
-        const endNode = { id: 'end', type: 'output', data: { label: 'End' }, position: { x: xPos + 100, y: yPos(initialSteps.length) }, deletable: false, draggable: true };
-
-        const allNodes = [startNode, ...stepNodes, endNode];
-
-        // --- Recalculate Edges: Pass onInsertStep correctly ---
-        const newEdges = [];
-        const edgeStyle = { stroke: '#6b7280', strokeWidth: 2 };
-        const markerEnd = { type: MarkerType.ArrowClosed, width: 20, height: 20, color: '#6b7280'};
-
-        // --- Helper function to create edge data ---
-        const createEdgeData = (index, targetId) => {
-            // Log right before creating the data object
-            console.log(`Creating edge data for index ${index}. typeof onInsertStep:`, typeof onInsertStep);
-            return {
-                onInsertStep: onInsertStep, // Use the onInsertStep from the useEffect's scope
-                sourceIndex: index,
-                targetId: targetId
-            };
-        };
-
-        if (stepNodes.length > 0) {
-            newEdges.push({
-                id: `e-start-step-0`, source: 'start', target: `step-0`, type: 'custom', animated: false, style: edgeStyle, markerEnd: markerEnd,
-                data: createEdgeData(-1, 'step-0') // Use helper
-            });
-        } else {
-             newEdges.push({
-                id: `e-start-end`, source: 'start', target: `end`, type: 'custom', animated: false, style: edgeStyle, markerEnd: markerEnd,
-                data: createEdgeData(-1, 'end') // Use helper
-            });
-        }
-
-        for (let i = 0; i < stepNodes.length - 1; i++) {
-            newEdges.push({
-                id: `e-step-${i}-step-${i + 1}`, source: `step-${i}`, target: `step-${i + 1}`, type: 'custom', animated: false, style: edgeStyle, markerEnd: markerEnd,
-                data: createEdgeData(i, `step-${i + 1}`) // Use helper
-            });
-        }
-
-        if (stepNodes.length > 0) {
-            newEdges.push({
-                id: `e-step-${stepNodes.length - 1}-end`, source: `step-${stepNodes.length - 1}`, target: 'end', type: 'custom', animated: false, style: edgeStyle, markerEnd: markerEnd,
-                data: createEdgeData(stepNodes.length - 1, 'end') // Use helper
-            });
-        }
-        // --- End Edge Recalculation ---
-
-        // Reverted to manual positioning and setNodes(allNodes)
-        setNodes(allNodes);
-        setEdges(newEdges);
-
-        if (selectedNodeId && !allNodes.find(n => n.id === selectedNodeId)) {
+        if (selectedNodeId && !layoutedNodes.find(n => n.id === selectedNodeId)) {
             setSelectedNodeId(null);
         }
 
         setTimeout(() => { fitView({ padding: 0.2, duration: 300 }); }, 50);
 
-    // Make sure onInsertStep is in the dependency array
-    }, [initialSteps, setNodes, setEdges, onInsertStep, selectedNodeId, fitView]);
-
+    }, [graphData, setNodes, setEdges, onInsertStep, fitView]); 
 
     const onNodeClick = useCallback((event, node) => {
          event.stopPropagation();
-        if (node.type === 'stepNode') {
+        if (node.type === 'stepNode' || node.type === 'decisionNode') {
             setSelectedNodeId(node.id);
         } else {
             setSelectedNodeId(null);
         }
     }, []);
 
-    const handleUpdateStep = useCallback((updatedStepData) => {
-        const newSteps = initialSteps.map((step, index) => {
-             if (`step-${index}` === selectedNodeId) {
-                 return { ...step, ...updatedStepData };
-             }
-             return step;
-         });
-         onStepsChange(newSteps);
-    }, [selectedNodeId, initialSteps, onStepsChange]);
+    const handleUpdateNode = useCallback((updatedData) => {
+        setNodes((nds) => nds.map((node) => {
+            if (node.id === selectedNodeId) {
+                return {
+                    ...node,
+                    data: {
+                        ...node.data,
+                        ...updatedData
+                    }
+                };
+            }
+            return node;
+        }));
+    }, [selectedNodeId, setNodes]);
+
+    // --- UPDATED: Save Logic ---
+    const handleSave = () => {
+        // Reconstruct valid graph data from current nodes and edges
+        const currentGraphPayload = reconstructGraph(nodes, edges);
+        
+        // Pass the updated graph payload to parent onSave handler
+        onSave(currentGraphPayload);
+    };
+    // ---------------------------
 
     const selectedNode = useMemo(() => nodes.find(n => n.id === selectedNodeId), [nodes, selectedNodeId]);
 
@@ -229,8 +363,8 @@ const WorkflowBuilder = ({
                     nodeTypes={nodeTypes}
                     edgeTypes={edgeTypes}
                     fitView
-                    nodesDraggable={true}
-                    nodesConnectable={false}
+                    nodesDraggable={true} 
+                    nodesConnectable={true} 
                     elementsSelectable={true}
                     deleteKeyCode={null}
                 >
@@ -247,7 +381,7 @@ const WorkflowBuilder = ({
                 </button>
 
                 <button
-                    onClick={onSave}
+                    onClick={handleSave} // <<< Call new handler
                     className="absolute top-4 right-4 px-6 py-2 bg-blue-600 text-white font-bold rounded-lg shadow-lg hover:bg-blue-700 transition focus:outline-none focus:ring-2 focus:ring-blue-400"
                 >
                     Save Agent
@@ -258,13 +392,13 @@ const WorkflowBuilder = ({
                     key={selectedNode.id}
                     nodeData={selectedNode.data}
                     availableScripts={availableScripts}
-                    onUpdate={handleUpdateStep}
+                    onUpdate={handleUpdateNode}
                     onClose={() => setSelectedNodeId(null)}
                     onAddNewScript={onAddNewScript}
                     onRematchStep={onRematchStep}
                     onCreateScript={onCreateScript}
-                    onDeleteStep={onDeleteStep} // <<< PASS PROP DOWN
-                    setConfirmationModal={setConfirmationModal} // <<< PASS PROP DOWN
+                    onDeleteStep={onDeleteStep} 
+                    setConfirmationModal={setConfirmationModal}
                 />
             )}
         </div>
@@ -278,4 +412,4 @@ const WorkflowBuilderWrapper = (props) => (
     </ReactFlowProvider>
 );
 
-export default WorkflowBuilderWrapper; // Export the wrapper
+export default WorkflowBuilderWrapper;
