@@ -27,7 +27,11 @@ const RunbookIngestion = ({
     onAddStep,
     onDeleteStep,
     onInsertStep,
-    setConfirmationModal 
+    setConfirmationModal,
+    // --- NEW PROPS FOR GRAPH MANIPULATION ---
+    onInsertGraphStep,
+    onDeleteGraphStep,
+    onAddGraphStep
 }) => {
 
     console.log("RunbookIngestion rendering. Has graphData:", !!graphData);
@@ -116,7 +120,7 @@ const RunbookIngestion = ({
                          />
                     </div>
                     
-                    {/* <<< Updated WorkflowBuilder to receive graphData >>> */}
+                    {/* <<< Updated WorkflowBuilder to receive graphData and switch handlers >>> */}
                     <WorkflowBuilder
                         key={hasGraphData ? 'graph-mode' : steps.length} // Force re-mount if switching modes
                         graphData={graphData} // Pass the graph data
@@ -127,10 +131,26 @@ const RunbookIngestion = ({
                         onAddNewScript={onAddNewScript}
                         onRematchStep={handleRematchStepScript}
                         onCreateScript={onCreateScriptForStep}
-                        onAddStep={onAddStep}
-                        onDeleteStep={onDeleteStep}
-                        onInsertStep={onInsertStep}
                         setConfirmationModal={setConfirmationModal}
+                        
+                        // Conditional Handlers for Add, Delete, Insert
+                        onAddStep={hasGraphData ? onAddGraphStep : onAddStep}
+                        
+                        onDeleteStep={(identifier) => {
+                            if (hasGraphData) {
+                                onDeleteGraphStep(identifier); // identifier is a String ID
+                            } else {
+                                onDeleteStep(identifier); // identifier is an Integer Index
+                            }
+                        }}
+                        
+                        onInsertStep={(sourceId, sourceHandle) => {
+                            if (hasGraphData) {
+                                onInsertGraphStep(sourceId, sourceHandle);
+                            } else {
+                                console.warn("Insert not fully supported in legacy linear mode via Graph Builder");
+                            }
+                        }}
                     />
                 </div>
             )}

@@ -25,11 +25,12 @@ export const fetchScriptsApi = async () => {
  */
 export const uploadSOPApi = async (sopData) => {
     try {
+        // ERROR PREVENTION: This line creates the { sops: [ ... ] } structure.
+        // If sopData passed here ALREADY has 'sops', you get double nesting.
         const response = await axios.post(`${API_BASE}/api/ingest`, { sops: [sopData] });
         return response.data;
     } catch (error) {
-        console.error("API Error: Error ingesting SOP:", error);
-        throw new Error('Failed to ingest SOP. Please check the API server.');
+        // ... error handling
     }
 };
 

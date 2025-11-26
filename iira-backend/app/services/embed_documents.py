@@ -38,17 +38,36 @@ def embed_and_store_sops(sops):
     points = []
     print(f"📄 Executing embed_and_store_sops function for {len(sops)} SOPs")
     for sop in sops:
-        # --- Create a richer content string for each step ---
         step_contents = []
-        for step in sop.get('steps', []):
-            description = step.get('description', '')
-            script = step.get('script') # The script name is now available here
-            if script:
-                # If a script exists, include it in the text to be embedded
-                step_contents.append(f"{description} (using the script: {script})")
-            else:
-                step_contents.append(description)
         
+        # 1. Try to get content from OLD 'steps' list
+        if sop.get('steps'):
+            for step in sop.get('steps', []):
+                description = step.get('description', '')
+                script = step.get('script')
+                if script:
+                    step_contents.append(f"{description} (using script: {script})")
+                else:
+                    step_contents.append(description)
+
+        # 2. If no steps, try to get content from NEW 'nodes' graph
+        elif sop.get('nodes'):
+            nodes = sop.get('nodes', {})
+            # We iterate all nodes to capture keywords. 
+            # (Ideally, you could traverse the graph, but iterating values is sufficient for keyword search)
+            for node in nodes.values():
+                description = node.get('description')
+                name = node.get('name')
+                script = node.get('script')
+                
+                node_text = []
+                if name: node_text.append(name)
+                if description: node_text.append(description)
+                if script: node_text.append(f"(using script: {script})")
+                
+                if node_text:
+                    step_contents.append(" ".join(node_text))
+       
         # --- Combine everything into the final content string ---
         content = f"Title: {sop.get('title', '')}. Issue: {sop.get('issue', '')}. Steps: {' '.join(step_contents)}"
         print(f"✅ Storing content '{content}' of SOP in Qdrant.")

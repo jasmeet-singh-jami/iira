@@ -103,6 +103,128 @@ function App() {
         fetchInitialData();
     }, []);
 
+    const handleGraphInsertStep = (sourceNodeId, sourceHandle = null) => {
+        setIngestionGraphData(prevGraph => {
+            const newGraph = JSON.parse(JSON.stringify(prevGraph)); // Deep clone
+            const nodes = newGraph.nodes;
+            const sourceNode = nodes[sourceNodeId];
+
+            if (!sourceNode) return prevGraph;
+
+            // Generate a unique ID for the new step
+            const newStepId = `step-${Date.now()}`;
+            
+            // Determine the current target (where the source is currently pointing)
+            let currentTargetId = null;
+            if (sourceNode.type === 'decision' && sourceHandle) {
+                currentTargetId = sourceNode.paths[sourceHandle];
+            } else {
+                currentTargetId = sourceNode.next;
+            }
+
+            // Create the new node
+            nodes[newStepId] = {
+                type: 'step',
+                name: 'New Step',
+                description: 'Describe this step...',
+                script: null,
+                script_id: null,
+                next: currentTargetId // Connect new node to the old target
+            };
+
+            // Point source node to the new node
+            if (sourceNode.type === 'decision' && sourceHandle) {
+                sourceNode.paths[sourceHandle] = newStepId;
+            } else {
+                sourceNode.next = newStepId;
+            }
+
+            return newGraph;
+        });
+    };
+
+    const handleGraphDeleteStep = (nodeId) => {
+        setIngestionGraphData(prevGraph => {
+            const newGraph = JSON.parse(JSON.stringify(prevGraph));
+            const nodes = newGraph.nodes;
+            const nodeToDelete = nodes[nodeId];
+
+            if (!nodeToDelete) return prevGraph;
+
+            // Determine where the deleted node points to (to bridge the gap)
+            const targetId = nodeToDelete.next || 'end';
+
+            // Find all parents (nodes pointing to the deleted node)
+            Object.values(nodes).forEach(node => {
+                // Check 'next' connection
+                if (node.next === nodeId) {
+                    node.next = targetId;
+                }
+                // Check 'decision' paths
+                if (node.type === 'decision' && node.paths) {
+                    Object.keys(node.paths).forEach(pathKey => {
+                        if (node.paths[pathKey] === nodeId) {
+                            node.paths[pathKey] = targetId;
+                        }
+                    });
+                }
+            });
+
+            // Handle Start Node case
+            if (newGraph.start_node_id === nodeId) {
+                newGraph.start_node_id = targetId;
+            }
+
+            // Remove the node
+            delete nodes[nodeId];
+
+            return newGraph;
+        });
+    };
+
+    const handleGraphAddStepToEnd = () => {
+        setIngestionGraphData(prevGraph => {
+            const newGraph = JSON.parse(JSON.stringify(prevGraph));
+            const nodes = newGraph.nodes;
+            
+            // Find nodes pointing to 'end'
+            const nodesPointingToEnd = Object.keys(nodes).filter(key => {
+                 const node = nodes[key];
+                 if (node.next === 'end') return true;
+                 if (node.paths) return Object.values(node.paths).includes('end');
+                 return false;
+            });
+
+            const newStepId = `step-${Date.now()}`;
+            
+            // Create new node pointing to end
+            nodes[newStepId] = {
+                type: 'step',
+                name: 'New Final Step',
+                description: 'New step at the end...',
+                next: 'end'
+            };
+
+            // Update previous end-pointers to point to this new node
+            nodesPointingToEnd.forEach(parentId => {
+                const parent = nodes[parentId];
+                if (parent.next === 'end') parent.next = newStepId;
+                if (parent.paths) {
+                    Object.keys(parent.paths).forEach(key => {
+                        if (parent.paths[key] === 'end') parent.paths[key] = newStepId;
+                    });
+                }
+            });
+            
+            // Handle edge case where start points directly to end
+            if(newGraph.start_node_id === 'end') {
+                 newGraph.start_node_id = newStepId;
+            }
+
+            return newGraph;
+        });
+    };
+
     const handleOpenAddScriptModal = () => { setScriptToEdit(null); setIsScriptModalOpen(true); };
     const confirmDeleteScript = async (scriptId) => {
          try {
@@ -208,13 +330,16 @@ function App() {
 
     const onIngestionStepsChange = (newSteps) => { setIngestionSteps(newSteps); };
     const handleAddIngestionStep = () => { setIngestionSteps(s => [ ...s, createNewStep() ]); };
+    
+    // --- FIX: Remove Modal Logic, perform deletion directly ---
     const handleDeleteIngestionStep = (indexToDelete) => {
-        if (ingestionSteps.length <= 1) { setModal({ visible: true, message: 'Cannot delete the only step.' }); return; }
-        setConfirmationModal({
-            isOpen: true, title: 'Delete Step', message: `Delete Step ${indexToDelete + 1}?`,
-            onConfirm: () => { setIngestionSteps(s => s.filter((_, i) => i !== indexToDelete)); closeConfirmationModal(); }
-        });
+        if (ingestionSteps.length <= 1) { 
+            setModal({ visible: true, message: 'Cannot delete the only step.' }); 
+            return; 
+        }
+        setIngestionSteps(s => s.filter((_, i) => i !== indexToDelete));
     };
+
     const handleInsertIngestionStep = (indexToInsertAfter) => {
         setIngestionSteps(s => { const newS = [...s]; newS.splice(indexToInsertAfter + 1, 0, createNewStep()); return newS; });
     };
@@ -334,6 +459,9 @@ function App() {
                             onDeleteStep={handleDeleteIngestionStep}
                             onInsertStep={handleInsertIngestionStep}
                             setConfirmationModal={setConfirmationModal}
+                            onInsertGraphStep={handleGraphInsertStep}
+                            onDeleteGraphStep={handleGraphDeleteStep}
+                            onAddGraphStep={handleGraphAddStepToEnd}
                         />;
             case 'scripts': return <ScriptsPage setConfirmationModal={setConfirmationModal}/>;
             case 'management': return <ManagementDashboard />;

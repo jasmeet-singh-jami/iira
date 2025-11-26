@@ -113,14 +113,7 @@ class Step(BaseModel):
     script: Optional[str] = None
     script_id: Optional[str] = None
 
-class SOP(BaseModel):
-    title: str
-    issue: str
-    tags: Optional[List[str]] = []
-    steps: List[Step]
 
-class IngestRequest(BaseModel):
-    sops: List[SOP]
 
 class ScriptParam(BaseModel):
     param_name: str
@@ -183,6 +176,29 @@ class RetrievalFeedbackRequest(BaseModel):
     correct_agent_id: Optional[str] = None
     correct_agent_title: Optional[str] = None
     session_id: Optional[str] = None # Optional: To link feedback session    
+
+# 1. Add a Node Model
+class Node(BaseModel):
+    type: str
+    name: Optional[str] = None
+    description: Optional[str] = None
+    script: Optional[str] = None
+    script_id: Optional[str] = None
+    next: Optional[str] = None
+    condition: Optional[str] = None
+    paths: Optional[Dict[str, str]] = None
+
+# 2. Update SOP Model to support both formats (or just the new one)
+class SOP(BaseModel):
+    title: str
+    issue: str
+    tags: Optional[List[str]] = []
+    nodes: Optional[Dict[str, Any]] = None  # Add support for nodes
+    start_node_id: Optional[str] = None     # Add support for start_node_id
+    steps: Optional[List[Step]] = []        # Make steps optional
+
+class IngestRequest(BaseModel):
+    sops: List[SOP]    
 
 async def monitor_new_incidents():
     """
@@ -247,26 +263,50 @@ async def monitor_new_incidents():
 def get_agent_status():
     return JSONResponse(content=agent_status)
 
+# In app/main.py inside ingest_sop function
+
+# In iira-backend/app/main.py
+
+# In iira-backend/app/main.py
+
 @app.post("/ingest")
 def ingest_sop(request: IngestRequest):
     """
-    Handles the ingestion of SOPs. This endpoint is now responsible for
-    enriching the SOP data by looking up script names from script_ids
-    before storing the document.
+    Handles the ingestion of SOPs. Accepts graph-based 'nodes' and flattens them
+    into 'steps' for vector embedding.
     """
     logger.info(f"📄 Executing ingest function for {len(request.sops)} SOP(s).")
     
-    # Convert Pydantic models to dictionaries to make them mutable
-    sop_dicts = [sop.model_dump() for sop in request.sops]
+    sop_dicts = []
     
     # Create a quick lookup map for script IDs to script names
     available_scripts = get_scripts_from_db()
     script_id_to_name_map = {str(script['id']): script['name'] for script in available_scripts}
 
-    # Enrich the SOP dictionaries with the script names
-    for sop in sop_dicts:
-        for step in sop.get("steps", []):
-            # If the step has an ID but no name, look it up and add it.
+    for sop in request.sops:
+        sop_data = sop.model_dump()
+        
+        # --- NEW LOGIC: Convert Graph Nodes to Linear Steps for Embedding ---
+        # If 'steps' is missing but 'nodes' exists, we extract the steps from the nodes.
+        if not sop_data.get("steps") and sop_data.get("nodes"):
+            extracted_steps = []
+            nodes = sop_data.get("nodes", {})
+            
+            for node in nodes.values():
+                # Only extract nodes that are actual steps (ignore start/decision/end for embedding)
+                if node.get("type") == "step":
+                    step_entry = {
+                        "description": node.get("description"),
+                        "script": node.get("script"),
+                        "script_id": node.get("script_id")
+                    }
+                    extracted_steps.append(step_entry)
+            
+            sop_data["steps"] = extracted_steps
+        # ---------------------------------------------------------------------
+
+        # Enrich the steps with script names if missing (Existing Logic)
+        for step in sop_data.get("steps", []):
             if step.get("script_id") and not step.get("script"):
                 script_id = str(step["script_id"])
                 script_name = script_id_to_name_map.get(script_id)
@@ -274,7 +314,9 @@ def ingest_sop(request: IngestRequest):
                     step["script"] = script_name
                     logger.info(f"Enriched step: found name '{script_name}' for ID '{script_id}'")
 
-    # Now, pass the fully enriched dictionaries to be stored
+        sop_dicts.append(sop_data)
+
+    # Pass the processed dictionaries to the embedding service
     embed_and_store_sops(sop_dicts)
     
     for sop in request.sops:

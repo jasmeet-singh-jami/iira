@@ -70,7 +70,8 @@ const reconstructGraph = (nodes, edges) => {
 
     nodes.forEach(node => {
         // Extract backend data, ignoring visual props like width/height/label if redundant
-        const { label, width, height, ...backendData } = node.data; 
+        // We also explicitly remove the 'id' we injected into data so it doesn't duplicate in backend JSON
+        const { label, width, height, id, ...backendData } = node.data; 
         
         const cleanNode = { ...backendData };
         
@@ -211,6 +212,7 @@ const buildFlowFromGraph = (graphData, onInsertStep) => {
             type: typeInfo.rfType,
             data: { 
                 ...sourceNodeData, 
+                id: sourceId, // <<< CRITICAL FIX: Inject ID so PropertiesPanel can read it
                 label: sourceNodeData.name || sourceId, 
                 width: typeInfo.width, 
                 height: typeInfo.height 
@@ -374,7 +376,7 @@ const WorkflowBuilder = ({
 
                  <button
                     onClick={onAddStep}
-                    className="absolute top-4 left-4 px-4 py-2 bg-green-600 text-white font-semibold rounded-lg shadow-lg hover:bg-green-700 transition flex items-center focus:outline-none focus:ring-2 focus:ring-green-400"
+                    className="absolute top-4 left-4 px-4 py-2 bg-green-600 text-white font-semibold rounded-lg shadow-lg hover:bg-green-600 transition flex items-center focus:outline-none focus:ring-2 focus:ring-green-400"
                     title="Add New Step to End"
                 >
                     <Plus size={18} className="mr-2"/> Add Step
